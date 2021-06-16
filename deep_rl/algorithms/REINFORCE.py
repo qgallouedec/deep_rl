@@ -12,6 +12,7 @@ comm = MPI.COMM_WORLD
 RANK = comm.Get_rank()
 SIZE = comm.Get_size()
 
+
 class REINFORCE:
     def __init__(self, env, lr=0.001, baseline_mean=True):
         """Implementation of REINFORCE algorithm.
@@ -34,7 +35,9 @@ class REINFORCE:
     def act(self, state, deterministic=False):
         """Returns the action sample by the agent."""
         distrib = self.predict(state)
-        action = distrib.sample().item() # sample action and convert into a single float.
+        action = (
+            distrib.sample().item()
+        )  # sample action and convert into a single float.
         return action
 
     def predict(self, state):
@@ -65,7 +68,7 @@ class REINFORCE:
             logprobs = self.predict(states).log_prob(actions)  # = log(pi(a | s))
             loss = -(returns * logprobs).mean()  # J = - G_t grad log(pi(a|s))
             # Optimize the model : theta <- theta - grad theta
-            self.optimizer.zero_grad() 
+            self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
             MPI.COMM_WORLD.bcast(self.nn.state_dict())
@@ -99,25 +102,27 @@ class REINFORCE:
                 state = self.env.reset()
                 done = False
                 states, actions, rewards = [], [], []
-    
+
     def train(self, nb_timesteps, test_fq, nb_test_rollout=1000):
-        nb_epochs = nb_timesteps // test_fq # test model every nb_rollout timesteps
+        nb_epochs = nb_timesteps // test_fq  # test model every nb_rollout timesteps
         nb_timesteps_per_epoch = nb_timesteps // nb_epochs
-        nb_timesteps_per_rollout = nb_timesteps_per_epoch // SIZE # share the training in all workers
+        nb_timesteps_per_rollout = (
+            nb_timesteps_per_epoch // SIZE
+        )  # share the training in all workers
         success_rates = []
         for epoch in range(nb_epochs):
-            if self._is_mpi_root: # do not execute test on non-root worker
+            if self._is_mpi_root:  # do not execute test on non-root worker
                 success_rate = self.test(nb_test_rollout)
                 print(epoch, success_rate)
                 success_rates.append(success_rate)
                 self.play_once()
             self.train_once(nb_timesteps_per_rollout)
-            
-        if self._is_mpi_root: # do not execute test on non-root worker
+
+        if self._is_mpi_root:  # do not execute test on non-root worker
             success_rate = self.test(nb_test_rollout)
             print(epoch, success_rate)
             success_rates.append(success_rate)
-    
+
         return success_rates
 
     def test(self, nb_tests):

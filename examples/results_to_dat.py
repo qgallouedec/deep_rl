@@ -24,5 +24,5 @@ def process(results):
 
 
 if __name__ == "__main__":
-    results = np.random.randn(100,101)
+    results = np.random.randn(100, 101)
     print(process(results))
