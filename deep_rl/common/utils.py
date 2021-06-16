@@ -10,7 +10,7 @@ def rewards_to_returns(rewards, gamma=1):
         rewards *= gamma
         returns += rewards
 
-    return returns
+    return list(returns)
 
 
 if __name__ == "__main__":
