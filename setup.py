@@ -12,5 +12,5 @@ setup(
     long_description_content_type="text/markdown",
     packages=find_packages(),
     version="0.0.0",
-    install_requires=["gym", "torch", "numpy", "pyglet==1.5.11"],
+    install_requires=["gym", "torch", "numpy", "mpi4py", "pyglet==1.5.11"],
 )
