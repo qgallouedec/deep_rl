@@ -1,16 +1,8 @@
 import torch
-from torch import optim
-from torch.distributions import Categorical
 
 from deep_rl.common import MLP, rewards_to_returns
 from deep_rl.common.mpi import gather
 import numpy as np
-
-from mpi4py import MPI
-
-comm = MPI.COMM_WORLD
-RANK = comm.Get_rank()
-SIZE = comm.Get_size()
 
 
 class REINFORCE:
@@ -24,31 +16,31 @@ class REINFORCE:
         """
         self.env = env
         self.nn = MLP([self.env.observation_space.shape[0], 4, self.env.action_space.n])
-        self._is_mpi_root = comm.Get_rank() == 0
 
         # Since the leanring is only on root, no need
         # to define optimizer and baseline_mean on other workers
-        if self._is_mpi_root:
-            self.optimizer = optim.SGD(self.nn.parameters(), lr=lr)
-            self.baseline_mean = baseline_mean
+        self.optimizer = torch.optim.SGD(self.nn.parameters(), lr=lr)
+        self.baseline_mean = baseline_mean
 
     def act(self, state, deterministic=False):
         """Returns the action sample by the agent."""
         distrib = self.predict(state)
-        action = (
-            distrib.sample().item()
-        )  # sample action and convert into a single float.
+        if deterministic:  # choose best action
+            action = torch.argmax(distrib).item()
+        else:  # sample action
+            action = distrib.sample().item()
+        action = action.item()  # convert tensor into a float.
         return action
 
     def predict(self, state):
-        """Return the distribution over the actions."""
+        """Return the probability distribution over the actions."""
         state = (
             torch.tensor(state, dtype=torch.float32)
             if not torch.is_tensor(state)
             else state
-        )
+        )  # convert state into a torch.Tensor
         logits = self.nn(state)
-        distrib = Categorical(logits=logits)
+        distrib = torch.distribution.Categorical(logits=logits)
         return distrib
 
     def learn(self, states, actions, returns):
@@ -58,23 +50,19 @@ class REINFORCE:
         actions = gather(actions)
         returns = gather(returns)
         # perform learning in root worker
-        if self._is_mpi_root:
-            states = torch.FloatTensor(states)
-            actions = torch.IntTensor(actions)
-            returns = torch.FloatTensor(returns)
 
-            if self.baseline_mean:
-                returns = returns - returns.mean()
-            logprobs = self.predict(states).log_prob(actions)  # = log(pi(a | s))
-            loss = -(returns * logprobs).mean()  # J = - G_t grad log(pi(a|s))
-            # Optimize the model : theta <- theta - grad theta
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-            MPI.COMM_WORLD.bcast(self.nn.state_dict())
-        else:
-            state_dict = MPI.COMM_WORLD.bcast(None)
-            self.nn.load_state_dict(state_dict)
+        states = torch.FloatTensor(states)
+        actions = torch.IntTensor(actions)
+        returns = torch.FloatTensor(returns)
+
+        if self.baseline_mean:
+            returns = returns - returns.mean()
+        logprobs = self.predict(states).log_prob(actions)  # = log(pi(a | s))
+        loss = -(returns * logprobs).mean()  # J = - G_t grad log(pi(a|s))
+        # Optimize the model : theta <- theta - grad theta
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
 
     def train_once(self, num_timesteps):
         """Train the agent for num_timesteps."""
@@ -106,9 +94,6 @@ class REINFORCE:
     def train(self, nb_timesteps, test_fq, nb_test_rollout=1000):
         nb_epochs = nb_timesteps // test_fq  # test model every nb_rollout timesteps
         nb_timesteps_per_epoch = nb_timesteps // nb_epochs
-        nb_timesteps_per_rollout = (
-            nb_timesteps_per_epoch // SIZE
-        )  # share the training in all workers
         success_rates = []
         for epoch in range(nb_epochs):
             if self._is_mpi_root:  # do not execute test on non-root worker
@@ -116,16 +101,15 @@ class REINFORCE:
                 print(epoch, success_rate)
                 success_rates.append(success_rate)
                 self.play_once()
-            self.train_once(nb_timesteps_per_rollout)
+            self.train_once(nb_timesteps_per_epoch)
 
-        if self._is_mpi_root:  # do not execute test on non-root worker
-            success_rate = self.test(nb_test_rollout)
-            print(epoch, success_rate)
-            success_rates.append(success_rate)
+        success_rate = self.test(nb_test_rollout)
+        print(epoch, success_rate)
+        success_rates.append(success_rate)
 
         return success_rates
 
-    def test(self, nb_tests):
+    def test(self, nb_tests, deterministic=True):
         """Test the policy nb_tests times and return the mean reward rate."""
         sum_rewards = []
         for _ in range(nb_tests):
@@ -134,7 +118,7 @@ class REINFORCE:
             rewards = []
             while not done:
                 # interract
-                action = self.act(state)
+                action = self.act(state, deterministic)
                 next_state, reward, done, _ = self.env.step(action)
                 # store
                 rewards.append(reward)
@@ -144,11 +128,11 @@ class REINFORCE:
 
         return np.mean(sum_rewards)
 
-    def play_once(self):
+    def play_once(self, deterministic=True):
         """Play once with rendering"""
         state = self.env.reset()
         done = False
         while not done:
-            action = self.act(state, deterministic=True)
+            action = self.act(state, deterministic)
             state, _, done, _ = self.env.step(action)
             self.env.render()
