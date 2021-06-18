@@ -45,7 +45,7 @@ class DQN:
         self.optimizer = torch.optim.SGD(self.Q_main.parameters(), lr=0.01)
 
         self.epsilon_start = 0.9
-        self.epsilon_decay = 0.9999
+        self.epsilon_decay = 0.99995
         self.epsilon_min = 0.05
         self.tau = 100
         self.gamma = 0.99
@@ -92,14 +92,16 @@ class DQN:
             state = next_state
 
             # get minibatch from the dataset
-            states, actions, rewards, next_states, dones = self.dataset.sample(self.batch_size)
+            states, actions, rewards, next_states, dones = self.dataset.sample(
+                self.batch_size
+            )
             # target = r + γ max_a′(Q_targ(s′,a′)) if s' is non terminal
             # target = r + 0                       otherwise
             next_state_values = torch.max(self.Q_targ(next_states), dim=1)[0]
             next_state_values[dones] = 0
             target = rewards + self.gamma * next_state_values
             # prediction = Q(s′,a′)
-            prediction = self.Q_main(states).gather(1, actions).squeeze()
+            prediction = self.Q_main(states).gather(1, actions).squeeze(1)
             # loss = |target - prediction|
             loss = self.criterion(target, prediction)
             # Optimize the model : theta <- theta - grad_theta*loss
@@ -125,8 +127,7 @@ class DQN:
                             timestep, nb_timesteps, test_return, epsilon, loss
                         )
                     )
-                # print(self.Q_main(torch.FloatTensor([0.1,-0.1,0.2,0.1]))[0].item())
-                test_returns.append(self.Q_main(torch.FloatTensor([0.1,-0.1,0.2,0.1]))[0].item())
+                test_returns.append(test_return)
 
         return test_returns
 
