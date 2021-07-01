@@ -1,5 +1,9 @@
-from deep_rl.utils import result_to_dat
+import tempfile
+import os
+
 import numpy as np
+
+from deep_rl.utils import result_to_dat
 
 
 def test_results_to_dat():
@@ -16,8 +20,9 @@ def test_results_to_dat():
             [1.052, 2.403, -0.317, -1.053, -0.436, -1.593, 0.195, 0.639, 0.688, 0.574],
         ]
     )
-    result_to_dat(timesteps, results, filename="/tmp/test_results.dat")
-    with open("/tmp/test_results.dat", "r") as file:
+    filename = os.path.join(tempfile.gettempdir(), "results.dat")
+    result_to_dat(timesteps, results, filename)
+    with open(filename, "r") as file:
         dat = file.readlines()
     first_line = dat.pop(0)
     # check the content of the first line
