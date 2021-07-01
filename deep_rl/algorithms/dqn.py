@@ -92,9 +92,7 @@ class DQN:
             state = next_state
 
             # get minibatch from the dataset
-            states, actions, rewards, next_states, dones = self.dataset.sample(
-                self.batch_size
-            )
+            states, actions, rewards, next_states, dones = self.dataset.sample(self.batch_size)
             # target = r + γ max_a′(Q_targ(s′,a′)) if s' is non terminal
             # target = r + 0                       otherwise
             next_state_values = torch.max(self.Q_targ(next_states), dim=1)[0]

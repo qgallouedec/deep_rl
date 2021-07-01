@@ -13,14 +13,24 @@ class REINFORCE:
             baseline_mean (bool, optional): Whether the mean return is used as baseline.
         """
         self.env = env
-        self.nn = MLP([self.env.observation_space.shape[0], 4, self.env.action_space.n])
-        self.optimizer = torch.optim.SGD(self.nn.parameters(), lr=0.005)
+        self.nn = MLP([self.env.observation_space.shape[0], 16, 16, self.env.action_space.n])
+        self.optimizer = torch.optim.SGD(self.nn.parameters(), lr=0.001)
         self.baseline_mean = baseline_mean
 
         self.gamma = 0.99
 
     def act(self, state, deterministic=False):
-        """Returns the action sample by the agent."""
+        """Returns the action sample by the agent.
+
+        Args:
+            state (list): The state.
+            deterministic (bool, optional): Whether the action is chosen
+                deterministically, or sample sampled from the distribution. Defaults
+                to False.
+
+        Returns:
+            int: The action.
+        """
         state = torch.FloatTensor(state)  # convert state into a torch.Tensor
         logits, distrib = self.predict(state)
         if deterministic:  # choose best action
@@ -37,7 +47,20 @@ class REINFORCE:
         return logits, distrib
 
     def train(self, nb_timesteps, test_fq=1000, nb_test_episodes=100, verbose=False):
-        test_returns = []
+        """Train the agent.
+
+        Args:
+            nb_timesteps (int): The number of interractions.
+            test_fq (int, optional): The testing frequency. Defaults to 1000.
+            nb_test_episodes (int, optional): Number of episodes for testing. Defaults
+                to 100.
+            verbose (bool, optional): Whether the results are printed. Defaults to
+                False.
+
+        Returns:
+            list: List of test mean returns.
+        """
+        timesteps, test_returns = [], []
         state = self.env.reset()
         done = False
         states, actions, rewards = [], [], []
@@ -49,7 +72,7 @@ class REINFORCE:
             actions.append(action)
             states.append(state)
             rewards.append(reward)
-
+            # the next state becomes the current state
             state = next_state
 
             if done:
@@ -60,9 +83,10 @@ class REINFORCE:
                 returns = torch.FloatTensor(returns)
                 if self.baseline_mean:
                     returns = returns - returns.mean()
-                _, distrib = self.predict(states) # pi(a | s)
+                _, distrib = self.predict(states)  # pi(a | s)
                 logprobs = distrib.log_prob(actions)  # = log(pi(a | s))
                 # J = - G_t grad log(pi(a|s))
+                # print(logprobs.mean())
                 loss = -(returns * logprobs).mean()  # J = - G_t grad log(pi(a|s))
                 # Optimize the model : theta <- theta - grad J(theta)
                 self.optimizer.zero_grad()
@@ -76,18 +100,14 @@ class REINFORCE:
             if timestep % test_fq == 0:
                 test_return = self.test(nb_test_episodes)
                 if verbose:
-                    print(
-                        "Timestep: {0:6d}/{1:6d}    Mean test return: {2:6.2f}".format(
-                            timestep, nb_timesteps, test_return
-                        )
-                    )
+                    print("Timestep: {0:6d}/{1:6d}    Mean test return: {2:6.2f}".format(timestep, nb_timesteps, test_return))
+                timesteps.append(timestep)
                 test_returns.append(test_return)
                 # start new episode
                 state = self.env.reset()
                 states, actions, rewards = [], [], []
                 done = False
-
-        return test_returns
+        return timesteps, test_returns
 
     def test(self, nb_test_episodes):
         """Test the policy nb_tests times and return the mean reward rate."""
@@ -106,4 +126,3 @@ class REINFORCE:
                 if done:
                     returns += rewards_to_returns(rewards, self.gamma)
         return np.mean(returns)
-

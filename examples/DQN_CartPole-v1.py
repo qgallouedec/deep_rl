@@ -1,17 +1,13 @@
 import gym
-from deep_rl.algorithms import DQN
 
-losses = []
-for _ in range(20):
+from deep_rl.algorithms import DQN
+from deep_rl.utils import results_to_dat
+
+results = []
+for _ in range(10):
     env = gym.make("CartPole-v1")
     agent = DQN(env)
-    losses.append(agent.train(600, 10, verbose=False))
+    timesteps, result = agent.train(100000, 1000, verbose=False)
+    results.append(result)
 
-print(losses)
-# for _ in range(100):
-#     state = env.reset()
-#     done = False
-#     while not done:
-#         action = agent.act(state)
-#         state, _, done, _ = env.step(action)
-#         env.render()
+results_to_dat(timesteps, results)

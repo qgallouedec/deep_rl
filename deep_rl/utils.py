@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def result_to_dat(timesteps, results, filename="results.dat"):
+def results_to_dat(timesteps, results, filename="results.dat"):
     """Generate a .dat with 4 columns : timestep, median value, low and high quantile value.
 
     Args:
@@ -29,4 +29,4 @@ if __name__ == "__main__":
     results = np.round(np.random.randn(8, 10), 3)
     print(results)
     timesteps = np.arange(10) * 100
-    result_to_dat(timesteps, results)
+    results_to_dat(timesteps, results)

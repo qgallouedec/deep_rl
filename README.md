@@ -7,3 +7,8 @@ Simple and intelligible implementation of Deep Reinforcement Leaning algorithms.
 [![codecov](https://codecov.io/gh/qgallouedec/deep_rl/branch/main/graph/badge.svg?token=tCLRWHpo2L)](https://codecov.io/gh/qgallouedec/deep_rl)
 
 
+## DQN
+
+## REINFORCE
+
+

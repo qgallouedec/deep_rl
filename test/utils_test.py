@@ -3,7 +3,7 @@ import os
 
 import numpy as np
 
-from deep_rl.utils import result_to_dat
+from deep_rl.utils import results_to_dat
 
 
 def test_results_to_dat():
@@ -21,7 +21,7 @@ def test_results_to_dat():
         ]
     )
     filename = os.path.join(tempfile.gettempdir(), "results.dat")
-    result_to_dat(timesteps, results, filename)
+    results_to_dat(timesteps, results, filename)
     with open(filename, "r") as file:
         dat = file.readlines()
     first_line = dat.pop(0)
