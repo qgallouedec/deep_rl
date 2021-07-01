@@ -1,6 +1,7 @@
 from deep_rl.utils import result_to_dat
 import numpy as np
 
+
 def test_results_to_dat():
     timesteps = np.arange(10) * 100
     results = np.array(
