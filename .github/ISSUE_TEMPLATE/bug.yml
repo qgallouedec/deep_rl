@@ -23,7 +23,7 @@ body:
     attributes:
       label: To Reproduce
       description: Steps to reproduce the behavior. Please try to provide a minimal example to reproduce the bug. Error messages and stack traces are also helpful.
-      placeholder: |
+      value: |
         Please use the [markdown code blocks](https://help.github.com/en/articles/creating-and-highlighting-code-blocks) for both code and stack traces.
 
         ```python
