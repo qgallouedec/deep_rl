@@ -1,9 +1,7 @@
 name: Bug Report
 description: File a bug report
 title: "[Bug]: "
-labels: ["bug", "triage"]
-assignees:
-  - octocat
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
@@ -13,7 +11,13 @@ body:
 
 
         If your issue is related to a **custom gym environment**, please use the custom gym env template.
-
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also tell us, what did you expect to happen?
+      placeholder: Tell us what you see!
+      value: |
         ### 🐛 Bug
 
         A clear and concise description of what the bug is.
@@ -41,54 +45,9 @@ body:
         ### Expected behavior
 
         A clear and concise description of what you expected to happen.
-
-
-        ### System Info
-
-        Describe the characteristic of your environment:
-         * Describe how the library was installed (pip, docker, source, ...)
-         * GPU models and configuration
-         * Python version
-         * PyTorch version
-         * Gym version
-         * Versions of any other relevant libraries
-
-
-  - type: textarea
-    id: what-happened
-    attributes:
-      label: What happened?
-      description: Also tell us, what did you expect to happen?
-      placeholder: Tell us what you see!
-      value: "A bug happened!"
+  
     validations:
       required: true
-  - type: dropdown
-    id: version
-    attributes:
-      label: Version
-      description: |
-        You can use `sb3.get_system_info()` to print relevant packages info:
- 
-        ```python
-        import stable_baselines3 as sb3
-        sb3.get_system_info()
-        ```
-      options:
-        - 1.0.2 (Default)
-        - 1.0.3 (Edge)
-    validations:
-      required: true
-  - type: dropdown
-    id: browsers
-    attributes:
-      label: What browsers are you seeing the problem on?
-      multiple: true
-      options:
-        - Firefox
-        - Chrome
-        - Safari
-        - Microsoft Edge
   - type: textarea
     id: logs
     attributes:
@@ -105,4 +64,6 @@ body:
         - label: I have read the [documentation](https://stable-baselines3.readthedocs.io/en/master/)
           required: true
         - label: I have provided a minimal working example to reproduce the bug
+          required: true
+        - label: I've used the [markdown code blocks](https://help.github.com/en/articles/creating-and-highlighting-code-blocks) for both code and stack traces.
           required: true
