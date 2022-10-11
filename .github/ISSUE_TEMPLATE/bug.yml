@@ -1,6 +1,6 @@
-name: Bug Report
-description: File a bug report
-title: "[Bug]: "
+name: "\U0001F41B Bug Report"
+description: Submit a bug report to help us improve Stable-Baselines3
+title: "[Bug]: bug title"
 labels: ["bug"]
 body:
   - type: markdown
@@ -8,7 +8,6 @@ body:
       value: |
         **Important Note: We do not do technical support, nor consulting** and don't answer personal questions per email.
         Please post your question on the [RL Discord](https://discord.com/invite/xhfNqQv), [Reddit](https://www.reddit.com/r/reinforcementlearning/) or [Stack Overflow](https://stackoverflow.com/) in that case.
-
 
         If your issue is related to a **custom gym environment**, please use the custom gym env template.
   - type: textarea
@@ -22,10 +21,10 @@ body:
     id: reproduce
     attributes:
       label: To Reproduce
-      description: Steps to reproduce the behavior. Please try to provide a minimal example to reproduce the bug. Error messages and stack traces are also helpful.
-      value: |
+      description: |
+        Steps to reproduce the behavior. Please try to provide a minimal example to reproduce the bug. Error messages and stack traces are also helpful.
         Please use the [markdown code blocks](https://help.github.com/en/articles/creating-and-highlighting-code-blocks) for both code and stack traces.
-
+      value: |
         ```python
         from stable_baselines3 import ...
 
