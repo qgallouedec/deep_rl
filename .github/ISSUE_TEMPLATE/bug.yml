@@ -67,7 +67,8 @@ body:
     id: version
     attributes:
       label: Version
-      description: You can use `sb3.get_system_info()` to print relevant packages info:
+      description: |
+        You can use `sb3.get_system_info()` to print relevant packages info:
  
         ```python
         import stable_baselines3 as sb3
