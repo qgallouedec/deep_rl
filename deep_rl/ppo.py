@@ -86,9 +86,9 @@ dones = torch.zeros((num_steps + 1))
 
 # Init the env
 observation = env.reset()
-done = False
-
 global_step = 0
+
+# Loop
 for update in range(num_updates):
     # Annealing the rate
     new_lr = (1.0 - update / num_updates) * learning_rate
