@@ -1,9 +1,10 @@
+import random
+from collections import deque
+
+import numpy as np
 import torch
 
 from deep_rl.common import MLP, rewards_to_returns
-import numpy as np
-import random
-from collections import deque
 
 
 class Dataset:
