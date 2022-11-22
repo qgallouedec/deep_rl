@@ -11,8 +11,3 @@ def rewards_to_returns(rewards, gamma=1):
         returns += rewards
 
     return list(returns)
-
-
-if __name__ == "__main__":
-    rewards = [[1.0, 2, 3], [3, 4, 5]]
-    print(rewards_to_returns(rewards, 0.5))
