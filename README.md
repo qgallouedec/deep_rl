@@ -2,15 +2,15 @@
 
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-Simple and intelligible implementation of Deep Reinforcement Leaning algorithms. 
+Single-file truly minimal implementation of state-of-the-art reinforcement learning algorithms.
 
 | Algorithm |                    |
 | --------- | ------------------ |
 | DQN       | :heavy_check_mark: |
-| REINFORCE | WIP                |
+| REINFORCE | :heavy_check_mark: |
 | PPO       | :heavy_check_mark: |
-
+| SAC       | :heavy_check_mark: |
 
 ## Credit
 
-The implementations are taken from [vwxyzjn/cleanrl](https://github.com/vwxyzjn/cleanrl) without being stricly equivalent.
+Most implementations are taken from [vwxyzjn/cleanrl](https://github.com/vwxyzjn/cleanrl) without being stricly equivalent.
