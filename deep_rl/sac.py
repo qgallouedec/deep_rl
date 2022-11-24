@@ -27,7 +27,7 @@ class TorchWrapper(gym.Wrapper):
 
 
 class SoftQNetwork(nn.Module):
-    def __init__(self, env: gym.Env):
+    def __init__(self, env: gym.Env) -> None:
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(np.prod(env.observation_space.shape) + np.prod(env.action_space.shape), 256),
@@ -44,7 +44,7 @@ class SoftQNetwork(nn.Module):
 
 
 class Actor(nn.Module):
-    def __init__(self, env: gym.Env):
+    def __init__(self, env: gym.Env) -> None:
         super().__init__()
         self.shared_net = nn.Sequential(
             nn.Linear(np.prod(env.observation_space.shape), 256),
