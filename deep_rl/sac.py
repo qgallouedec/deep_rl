@@ -62,29 +62,25 @@ class Actor(nn.Module):
         self.register_buffer("action_scale", action_scale)
         self.register_buffer("action_bias", action_bias)
 
-    def forward(self, observation: Tensor) -> Tuple[Tensor, Tensor]:
+    def get_action(self, observation: Tensor) -> Tuple[Tensor, Tensor]:
         x = self.shared_net(observation)
         mean = self.mean_net(x)
         log_std = self.log_std_net(x)
         log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (log_std + 1)  # From SpinUp / Denis Yarats
-        return mean, log_std
-
-    def get_action(self, observation: Tensor) -> Tuple[Tensor, Tensor]:
-        mean, log_std = self.forward(observation)
         distribution = Normal(mean, log_std.exp())
-        x_t = distribution.rsample()  # for reparameterization trick (mean + std * N(0,1))
-        y_t = torch.tanh(x_t)
-        action = y_t * self.action_scale + self.action_bias
-        log_prob = distribution.log_prob(x_t)
+        sample = distribution.rsample()  # for reparameterization trick (mean + std * N(0,1))
+        unscaled_action = torch.tanh(sample)
+        log_prob = distribution.log_prob(sample)
         # Enforcing Action Bound
-        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
-        log_prob = log_prob.sum(-1)
+        log_prob -= torch.log(self.action_scale * (1 - unscaled_action.pow(2)) + 1e-6)
+        log_prob = torch.sum(log_prob, dim=-1)
+        action = unscaled_action * self.action_scale + self.action_bias
         return action, log_prob
 
 
 env_id = "HopperBulletEnv-v0"
 
-total_timesteps = 6_000
+total_timesteps = 30_000
 learning_starts = 5_000
 
 policy_frequency = 2
