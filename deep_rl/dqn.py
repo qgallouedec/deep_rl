@@ -1,13 +1,32 @@
+from typing import Any, Dict, Optional, Tuple, Union
+
 import gym
 import numpy as np
 import torch
-from torch import nn, optim
+from torch import Tensor, nn, optim
 
-from deep_rl.common.wrappers import TorchWrapper
+
+class TorchWrapper(gym.Wrapper):
+    """
+    Torch wrapper. Actions and observations are Tensors instead of arrays.
+    """
+
+    def __init__(self, env: gym.Env, device: Optional[Union[torch.device, str]] = None) -> None:
+        super().__init__(env)
+        self.device = device
+
+    def step(self, action: Tensor) -> Tuple[Tensor, float, bool, Dict[str, Any]]:
+        action = action.cpu().numpy()
+        observation, reward, done, info = self.env.step(action)
+        return torch.tensor(observation).to(self.device), reward, done, info
+
+    def reset(self) -> Tensor:
+        observation = self.env.reset()
+        return torch.tensor(observation).to(self.device)
 
 
 class QNetwork(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env: gym.Env) -> None:
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(np.array(env.observation_space.shape).prod(), 120),
@@ -17,8 +36,8 @@ class QNetwork(nn.Module):
             nn.Linear(84, env.action_space.n),
         )
 
-    def forward(self, x):
-        return self.network(x)
+    def forward(self, observation) -> Tensor:
+        return self.network(observation)
 
 
 env_id = "CartPole-v1"
@@ -93,7 +112,7 @@ while global_step < total_timesteps:
     terminated[global_step] = done and not info.get("TimeLimit.truncated", False)
 
     if "episode" in info.keys():
-        print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+        print(f"global_step={global_step}, episodic_return={info['episode']['r']:.2f}")
 
     # Optimize the agent
     if global_step >= learning_starts:

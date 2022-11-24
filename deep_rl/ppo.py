@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 import gym
 import numpy as np
@@ -6,7 +6,24 @@ import torch
 from torch import Tensor, nn, optim
 from torch.distributions import Categorical, Distribution
 
-from deep_rl.common.wrappers import TorchWrapper
+
+class TorchWrapper(gym.Wrapper):
+    """
+    Torch wrapper. Actions and observations are Tensors instead of arrays.
+    """
+
+    def __init__(self, env: gym.Env, device: Optional[Union[torch.device, str]] = None) -> None:
+        super().__init__(env)
+        self.device = device
+
+    def step(self, action: Tensor) -> Tuple[Tensor, float, bool, Dict[str, Any]]:
+        action = action.cpu().numpy()
+        observation, reward, done, info = self.env.step(action)
+        return torch.tensor(observation).to(self.device), reward, done, info
+
+    def reset(self) -> Tensor:
+        observation = self.env.reset()
+        return torch.tensor(observation).to(self.device)
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -114,7 +131,7 @@ for update in range(num_updates):
         observation, reward, done, info = env.step(action)
         if done:
             observation = env.reset()
-            print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+            print(f"global_step={global_step}, episodic_return={info['episode']['r']:.2f}")
 
         # Update count
         step += 1
