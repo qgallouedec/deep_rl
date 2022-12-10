@@ -38,7 +38,7 @@ class QNetwork(nn.Module):
 
 env_id = "CartPole-v1"
 
-total_timesteps = 20_000
+total_timesteps = 100_000
 learning_starts = 10_000
 
 start_e = 1
