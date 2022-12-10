@@ -4,12 +4,13 @@
 
 Single-file truly minimal implementation of state-of-the-art reinforcement learning algorithms.
 
-| Algorithm |                    |
-| --------- | ------------------ |
-| DQN       | :heavy_check_mark: |
-| REINFORCE | :heavy_check_mark: |
-| PPO       | :heavy_check_mark: |
-| SAC       | :heavy_check_mark: |
+| Algorithm   |                    |
+| ----------- | ------------------ |
+| DQN         | :heavy_check_mark: |
+| Dueling DQN | :heavy_check_mark: |
+| REINFORCE   | :heavy_check_mark: |
+| PPO         | :heavy_check_mark: |
+| SAC         | :heavy_check_mark: |
 
 ## Credit
 
