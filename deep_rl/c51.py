@@ -41,7 +41,7 @@ class QNetwork(nn.Module):
 
 env_id = "CartPole-v1"
 
-total_timesteps = 100_000
+total_timesteps = 20_000
 learning_starts = 10_000
 
 start_e = 1
@@ -71,7 +71,6 @@ env.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
 env.action_space.seed(seed)
-env.observation_space.seed(seed)
 
 # Network setup
 q_network = QNetwork(env, n_atoms=n_atoms)
