@@ -22,17 +22,15 @@ class TorchWrapper(gym.Wrapper):
 
 
 class QNetwork(nn.Module):
-    def __init__(self, env, n_atoms=101):
+    def __init__(self, env: gym.Env, n_atoms: int) -> None:
         super().__init__()
-        self.n_atoms = n_atoms
-        self.n = env.action_space.n
         self.network = nn.Sequential(
             nn.Linear(np.prod(env.observation_space.shape), 120),
             nn.ReLU(),
             nn.Linear(120, 84),
             nn.ReLU(),
-            nn.Linear(84, self.n * n_atoms),
-            nn.Unflatten(-1, (self.n, self.n_atoms)),
+            nn.Linear(84, env.action_space.n * n_atoms),
+            nn.Unflatten(-1, (env.action_space.n, n_atoms)),
         )
 
     def get_probs(self, observation: Tensor) -> Tensor:
