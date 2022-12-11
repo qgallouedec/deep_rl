@@ -6,6 +6,7 @@ Single-file truly minimal implementation of state-of-the-art reinforcement learn
 
 | Algorithm   |                    |
 | ----------- | ------------------ |
+| C51         | :heavy_check_mark: |
 | DQN         | :heavy_check_mark: |
 | Dueling DQN | :heavy_check_mark: |
 | REINFORCE   | :heavy_check_mark: |
