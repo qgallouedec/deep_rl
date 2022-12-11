@@ -25,14 +25,14 @@ class QNetwork(nn.Module):
     def __init__(self, env: gym.Env) -> None:
         super().__init__()
         self.network = nn.Sequential(
-            nn.Linear(np.array(env.observation_space.shape).prod(), 120),
+            nn.Linear(np.prod(env.observation_space.shape), 120),
             nn.ReLU(),
             nn.Linear(120, 84),
             nn.ReLU(),
             nn.Linear(84, env.action_space.n),
         )
 
-    def forward(self, observation) -> Tensor:
+    def forward(self, observation: Tensor) -> Tensor:
         return self.network(observation)
 
 
