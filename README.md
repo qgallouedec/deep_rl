@@ -10,6 +10,7 @@ Single-file truly minimal implementation of state-of-the-art reinforcement learn
 | ARS           | :x:                |
 | C51           | :heavy_check_mark: |
 | DDPG          | :heavy_check_mark: |
+| Double DQN    | :x:                |
 | DQN           | :heavy_check_mark: |
 | Dueling DQN   | :heavy_check_mark: |
 | FQF           | :x:                |
