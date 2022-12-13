@@ -4,15 +4,33 @@
 
 Single-file truly minimal implementation of state-of-the-art reinforcement learning algorithms.
 
-| Algorithm   |                    |
-| ----------- | ------------------ |
-| C51         | :heavy_check_mark: |
-| DQN         | :heavy_check_mark: |
-| Dueling DQN | :heavy_check_mark: |
-| REINFORCE   | :heavy_check_mark: |
-| PPO         | :heavy_check_mark: |
-| SAC         | :heavy_check_mark: |
+| Algorithm     |                    |
+| ------------- | ------------------ |
+| A2C           | :x:                |
+| ARS           | :x:                |
+| C51           | :heavy_check_mark: |
+| DDPG          | :heavy_check_mark: |
+| DQN           | :heavy_check_mark: |
+| Dueling DQN   | :heavy_check_mark: |
+| FQF           | :x:                |
+| IQN           | :x:                |
+| RAINBOW       | :x:                |
+| Recurrent PPO | :x:                |
+| REINFORCE     | :heavy_check_mark: |
+| PPO           | :heavy_check_mark: |
+| QR-DQN        | :x:                |
+| SAC           | :heavy_check_mark: |
+| TD3           | :x:                |
+| TQC           | :x:                |
+| TRPO          | :x:                |
+
 
 ## Credit
 
 Most implementations are taken from [vwxyzjn/cleanrl](https://github.com/vwxyzjn/cleanrl) without being stricly equivalent.
+
+## Contributions
+
+are welcome.
+
+
