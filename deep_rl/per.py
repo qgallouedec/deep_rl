@@ -125,9 +125,6 @@ while global_step < total_timesteps:
     if global_step >= learning_starts:
         if global_step % train_frequency == 0:
             probabilities = priorities**alpha / torch.sum(priorities**alpha)
-            weights = 1 / (total_timesteps * probabilities) ** beta
-            weights = weights / torch.max(weights)
-
             batch_inds = torch.multinomial(priorities, batch_size, replacement=True)
 
             b_observations = observations[batch_inds]
@@ -135,13 +132,17 @@ while global_step < total_timesteps:
             b_next_observations = observations[batch_inds + 1]
             b_rewards = rewards[batch_inds + 1]
             b_terminated = terminated[batch_inds + 1]
+            b_probabilities = probabilities[batch_inds + 1]
+
+            weights = 1 / (total_timesteps * b_probabilities) ** beta
+            weights = weights / torch.max(weights)
 
             with torch.no_grad():
                 target_max, _ = target_network(b_next_observations).max(dim=1)
             td_target = b_rewards + gamma * target_max * torch.logical_not(b_terminated).float()
             old_val = q_network(b_observations)[range(batch_size), b_actions]
             td_errors = (td_target - old_val) ** 2
-            loss = torch.mean(td_errors)
+            loss = torch.mean(weights * td_errors)
 
             # Optimize the model
             optimizer.zero_grad()
@@ -150,7 +151,7 @@ while global_step < total_timesteps:
 
             # Update beta and priorities
             beta = min(1.0, beta + beta_increment_per_sampling)
-            priorities[batch_inds] = td_errors
+            priorities[batch_inds] = td_errors.detach()
 
         # Update the target network
         if global_step % target_network_frequency == 0:
