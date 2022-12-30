@@ -135,7 +135,6 @@ while global_step < total_timesteps:
             b_next_observations = observations[batch_inds + 1]
             b_rewards = rewards[batch_inds + 1]
             b_terminated = terminated[batch_inds + 1]
-            weights = weights[batch_inds + 1]
 
             with torch.no_grad():
                 target_max, _ = target_network(b_next_observations).max(dim=1)
