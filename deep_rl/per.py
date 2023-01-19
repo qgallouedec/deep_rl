@@ -134,9 +134,6 @@ while global_step < total_timesteps:
             b_rewards = rewards[batch_inds + 1]
             b_terminated = terminated[batch_inds + 1]
 
-            weights = (global_step * b_probabilities) ** -beta
-            weights = weights / torch.max(weights)
-
             with torch.no_grad():
                 target_max, _ = target_network(b_next_observations).max(dim=1)
             td_target = b_rewards + gamma * target_max * torch.logical_not(b_terminated).float()
@@ -148,6 +145,8 @@ while global_step < total_timesteps:
             max_priority = max(torch.max(priorities), max_priority)
 
             # Compute loss
+            weights = (global_step * b_probabilities) ** -beta
+            weights = weights / torch.max(weights)
             loss = torch.mean(weights* td_errors**2)
 
             # Optimize the model
