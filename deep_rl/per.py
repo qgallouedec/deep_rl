@@ -36,7 +36,7 @@ class QNetwork(nn.Module):
         return self.network(observation)
 
 
-env_id = "CartPole-v1"
+env_id = "LunarLander-v2"
 
 total_timesteps = 100_000
 learning_starts = 10_000
@@ -147,7 +147,7 @@ while global_step < total_timesteps:
             # Compute loss
             weights = (global_step * b_probabilities) ** -beta
             weights = weights / torch.max(weights)
-            loss = torch.mean(weights* td_errors**2)
+            loss = torch.mean(weights * td_errors**2)
 
             # Optimize the model
             optimizer.zero_grad()
