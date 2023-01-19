@@ -4,26 +4,29 @@
 
 Single-file truly minimal implementation of state-of-the-art reinforcement learning algorithms.
 
-| Algorithm     |                    |
-| ------------- | ------------------ |
-| A2C           | :x:                |
-| ARS           | :x:                |
-| C51           | :heavy_check_mark: |
-| DDPG          | :heavy_check_mark: |
-| Double DQN    | :x:                |
-| DQN           | :heavy_check_mark: |
-| Dueling DQN   | :heavy_check_mark: |
-| FQF           | :x:                |
-| IQN           | :x:                |
-| RAINBOW       | :x:                |
-| Recurrent PPO | :x:                |
-| REINFORCE     | :heavy_check_mark: |
-| PPO           | :heavy_check_mark: |
-| QR-DQN        | :x:                |
-| SAC           | :heavy_check_mark: |
-| TD3           | :x:                |
-| TQC           | :x:                |
-| TRPO          | :x:                |
+| Algorithm          |                    |
+| ------------------ | ------------------ |
+| A2C                | :x:                |
+| ARS                | :x:                |
+| C51                | :heavy_check_mark: |
+| DDPG               | :heavy_check_mark: |
+| Double DQN         | :x:                |
+| DQN                | :heavy_check_mark: |
+| Dueling DQN        | :heavy_check_mark: |
+| FQF                | :x:                |
+| IQN                | :x:                |
+| RAINBOW            | :x:                |
+| Recurrent PPO      | :x:                |
+| REINFORCE          | :heavy_check_mark: |
+| PER <sup>(1)</sup> | :heavy_check_mark: |
+| PPO                | :heavy_check_mark: |
+| QR-DQN             | :x:                |
+| SAC                | :heavy_check_mark: |
+| TD3                | :x:                |
+| TQC                | :x:                |
+| TRPO               | :x:                |
+
+<sup>(1)</sup> with DQN
 
 
 ## Credit
