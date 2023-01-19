@@ -46,9 +46,8 @@ end_e = 0.05
 exploration_fraction = 0.5
 slope = (end_e - start_e) / (exploration_fraction * total_timesteps)
 
-max_priority = 1.0
-beta_increment_per_sampling = 0.001
 alpha = 0.6
+beta_0 = 0.4
 
 train_frequency = 10
 batch_size = 128
@@ -80,8 +79,8 @@ rewards = torch.zeros((total_timesteps + 1))
 terminated = torch.zeros((total_timesteps + 1), dtype=torch.bool)
 priorities = torch.zeros((total_timesteps + 1), dtype=torch.float32)
 
-# Initialize beta
-beta = 0.4
+# Initialize max_priority
+max_priority = 1e-2
 
 # Initiate the envrionment and store the inital observation
 observation = env.reset()
@@ -103,7 +102,7 @@ while global_step < total_timesteps:
     actions[global_step] = action
 
     # Compute and store priority
-    priorities[global_step] = max(torch.max(priorities), 1.0)
+    priorities[global_step] = max_priority
 
     # Step
     observation, reward, done, info = env.step(action)
@@ -124,34 +123,37 @@ while global_step < total_timesteps:
     # Optimize the agent
     if global_step >= learning_starts:
         if global_step % train_frequency == 0:
+            beta = (1 - beta_0) * global_step / total_timesteps + beta_0  # beta starts at beta_0 and linearly increase to 1.
             probabilities = priorities**alpha / torch.sum(priorities**alpha)
             batch_inds = torch.multinomial(priorities, batch_size, replacement=True)
 
+            b_probabilities = probabilities[batch_inds]
             b_observations = observations[batch_inds]
             b_actions = actions[batch_inds]
             b_next_observations = observations[batch_inds + 1]
             b_rewards = rewards[batch_inds + 1]
             b_terminated = terminated[batch_inds + 1]
-            b_probabilities = probabilities[batch_inds + 1]
 
-            weights = 1 / (total_timesteps * b_probabilities) ** beta
+            weights = (global_step * b_probabilities) ** -beta
             weights = weights / torch.max(weights)
 
             with torch.no_grad():
                 target_max, _ = target_network(b_next_observations).max(dim=1)
             td_target = b_rewards + gamma * target_max * torch.logical_not(b_terminated).float()
             old_val = q_network(b_observations)[range(batch_size), b_actions]
-            td_errors = (td_target - old_val) ** 2
-            loss = torch.mean(weights * td_errors)
+            td_errors = td_target - old_val
+
+            # Update priorities and max priority
+            priorities[batch_inds] = torch.abs(td_errors).detach()
+            max_priority = max(torch.max(priorities), max_priority)
+
+            # Compute loss
+            loss = torch.mean(weights* td_errors**2)
 
             # Optimize the model
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-
-            # Update beta and priorities
-            beta = min(1.0, beta + beta_increment_per_sampling)
-            priorities[batch_inds] = td_errors.detach()
 
         # Update the target network
         if global_step % target_network_frequency == 0:
