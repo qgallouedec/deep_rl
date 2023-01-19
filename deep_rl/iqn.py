@@ -3,8 +3,7 @@ import torch
 from torch import Tensor, nn
 from torch.optim import Adam
 
-from fqf_iqn_qrdqn.env import make_pytorch_env
-from fqf_iqn_qrdqn.memory import LazyMultiStepMemory
+import utils
 
 
 def initialize_weights_he(m):
@@ -214,7 +213,6 @@ class IQNAgent:
         lr=5e-5,
         memory_size=1_000_000,
         gamma=0.99,
-        multi_step=1,
         update_interval=4,
         target_update_interval=10_000,
         start_steps=50_000,
@@ -236,7 +234,7 @@ class IQNAgent:
         self.device = torch.device("cuda" if cuda and torch.cuda.is_available() else "cpu")
 
         # Replay memory which is memory-efficient to store stacked frames.
-        self.memory = LazyMultiStepMemory(memory_size, self.env.observation_space.shape, self.device, gamma, multi_step)
+        self.memory = utils.LazyMultiStepMemory(memory_size, self.env.observation_space.shape, self.device, gamma)
 
         self.steps = 0
         self.learning_steps = 0
@@ -246,7 +244,7 @@ class IQNAgent:
         self.batch_size = batch_size
 
         self.log_interval = log_interval
-        self.gamma_n = gamma**multi_step
+        self.gamma = gamma
         self.start_steps = start_steps
         self.epsilon_train = epsilon_train
         self.epsilon_decay_steps = epsilon_decay_steps
@@ -256,11 +254,11 @@ class IQNAgent:
 
         # Online network.
         self.online_net = IQN(
-            num_channels=env.observation_space.shape[0], num_actions=self.num_actions, K=K, num_cosines=num_cosines
+            num_channels=env.observation_space.shape[2], num_actions=self.num_actions, K=K, num_cosines=num_cosines
         ).to(self.device)
         # Target network.
         self.target_net = IQN(
-            num_channels=env.observation_space.shape[0], num_actions=self.num_actions, K=K, num_cosines=num_cosines
+            num_channels=env.observation_space.shape[2], num_actions=self.num_actions, K=K, num_cosines=num_cosines
         ).to(self.device)
 
         # Copy parameters of the learning network to the target network.
@@ -300,7 +298,7 @@ class IQNAgent:
             if self.steps < self.start_steps or np.random.rand() < epsilon:
                 action = self.env.action_space.sample()
             else:
-                observation_ = torch.ByteTensor(observation).unsqueeze(0).to(self.device).float() / 255.0
+                observation_ = torch.ByteTensor(observation).unsqueeze(0).to(self.device).float().permute(0, 3, 1, 2) / 255.0
                 with torch.no_grad():
                     embeddings = self.online_net.compute_embeddings(observation_)
                     action = self.online_net.compute_q_values(embeddings).argmax().item()
@@ -360,7 +358,7 @@ class IQNAgent:
 
             # Calculate target quantile values.
             target_sa_quantiles = (
-                rewards[..., None] + (1.0 - dones[..., None]) * self.gamma_n * next_sa_quantiles
+                rewards[..., None] + (1.0 - dones[..., None]) * self.gamma * next_sa_quantiles
             )  # (self.batch_size, 1, self.N_dash)
 
         td_errors = target_sa_quantiles - current_sa_quantiles
@@ -372,6 +370,7 @@ class IQNAgent:
 
 
 if __name__ == "__main__":
+    import gym
 
     net = CosineEmbeddingNetwork()
     x = torch.randint(0, 3, (4, 3))
@@ -379,7 +378,7 @@ if __name__ == "__main__":
     env_id = "PongNoFrameskip-v4"
 
     # Create environments.
-    env = make_pytorch_env(env_id)
+    env = utils.AtariWrapper(gym.make(env_id))
 
     # Create the agent and run.
     agent = IQNAgent(env=env, num_steps=10_000, start_steps=5_000)
