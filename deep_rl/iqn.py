@@ -6,29 +6,64 @@ from torch.optim import Adam
 import utils
 
 
+class LazyMultiStepMemory(dict):
+    state_keys = ["state", "next_state"]
+    np_keys = ["action", "reward", "done"]
+    keys = state_keys + np_keys
+
+    def __init__(self, capacity, state_shape, device):
+        self.capacity = int(capacity)
+        self.state_shape = state_shape
+        self.device = device
+        self["state"] = []
+        self["next_state"] = []
+        self["action"] = np.empty((self.capacity, 1), dtype=np.int64)
+        self["reward"] = np.empty((self.capacity, 1), dtype=np.float32)
+        self["done"] = np.empty((self.capacity, 1), dtype=np.float32)
+
+        self._n = 0
+        self._p = 0
+
+    def append(self, state, action, reward, next_state, done):
+        self["state"].append(state)
+        self["next_state"].append(next_state)
+        self["action"][self._p] = action
+        self["reward"][self._p] = reward
+        self["done"][self._p] = done
+
+        self._n = min(self._n + 1, self.capacity)
+        self._p = (self._p + 1) % self.capacity
+        # Truncate
+        while len(self["state"]) > self.capacity:
+            del self["state"][0]
+            del self["next_state"][0]
+
+    def sample(self, batch_size):
+        indices = np.random.randint(low=0, high=len(self["state"]), size=batch_size)
+        bias = -self._p if self._n == self.capacity else 0
+
+        states = np.empty((batch_size, *self.state_shape), dtype=np.uint8)
+        next_states = np.empty((batch_size, *self.state_shape), dtype=np.uint8)
+
+        for i, index in enumerate(indices):
+            _index = np.mod(index + bias, self.capacity)
+            states[i, ...] = self["state"][_index]
+            next_states[i, ...] = self["next_state"][_index]
+
+        states = torch.ByteTensor(states).to(self.device).float().permute(0, 3, 1, 2) / 255.0
+        next_states = torch.ByteTensor(next_states).to(self.device).float().permute(0, 3, 1, 2) / 255.0
+        actions = torch.LongTensor(self["action"][indices]).to(self.device)
+        rewards = torch.FloatTensor(self["reward"][indices]).to(self.device)
+        dones = torch.FloatTensor(self["done"][indices]).to(self.device)
+
+        return states, actions, rewards, next_states, dones
+
+
 def initialize_weights_he(m):
     if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
         torch.nn.init.kaiming_uniform_(m.weight)
         if m.bias is not None:
             torch.nn.init.constant_(m.bias, 0)
-
-
-class DQNBase(nn.Module):
-    def __init__(self, num_channels: int) -> None:
-        super().__init__()
-
-        self.net = nn.Sequential(
-            nn.Conv2d(num_channels, 32, kernel_size=8, stride=4, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
-            nn.ReLU(),
-            nn.Flatten(),
-        ).apply(initialize_weights_he)
-
-    def forward(self, observations: Tensor) -> Tensor:
-        return self.net(observations)
 
 
 class CosineEmbeddingNetwork(nn.Module):
@@ -124,7 +159,15 @@ class IQN(nn.Module):
         super().__init__()
 
         # Feature extractor of DQN.
-        self.dqn_net = DQNBase(num_channels=num_channels)
+        self.dqn_net = nn.Sequential(
+            nn.Conv2d(num_channels, 32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.Flatten(),
+        ).apply(initialize_weights_he)
         # Cosine embedding network.
         self.cosine_net = CosineEmbeddingNetwork(num_cosines=num_cosines, embedding_dim=embedding_dim)
         # Quantile network.
@@ -172,16 +215,14 @@ def evaluate_quantile_at_action(s_quantiles, actions):
     return sa_quantiles
 
 
-def calculate_huber_loss(td_errors, kappa=1.0):
-    return torch.where(td_errors.abs() <= kappa, 0.5 * td_errors.pow(2), kappa * (td_errors.abs() - 0.5 * kappa))
-
-
-def calculate_quantile_huber_loss(td_errors, taus, kappa=1.0):
+def calculate_quantile_huber_loss(td_errors, taus, kappa):
     assert not taus.requires_grad
     batch_size, N, N_dash = td_errors.shape
 
     # Calculate huber loss element-wisely.
-    element_wise_huber_loss = calculate_huber_loss(td_errors, kappa)
+    element_wise_huber_loss = torch.where(
+        td_errors.abs() <= kappa, 0.5 * td_errors.pow(2), kappa * (td_errors.abs() - 0.5 * kappa)
+    )
     assert element_wise_huber_loss.shape == (batch_size, N, N_dash)
 
     # Calculate quantile huber loss element-wisely.
@@ -199,187 +240,149 @@ def calculate_quantile_huber_loss(td_errors, taus, kappa=1.0):
     return quantile_huber_loss
 
 
-class IQNAgent:
-    def __init__(
-        self,
-        env,
-        num_steps=50_000_000,
-        batch_size=32,
-        N=64,
-        N_dash=64,
-        K=32,
-        num_cosines=64,
-        kappa=1.0,
-        lr=5e-5,
-        memory_size=1_000_000,
-        gamma=0.99,
-        update_interval=4,
-        target_update_interval=10_000,
-        start_steps=50_000,
-        epsilon_train=0.01,
-        epsilon_decay_steps=250_000,
-        log_interval=100,
-        max_episode_steps=27_000,
-        cuda=True,
-        seed=0,
-    ):
-        self.env = env
+import gym
 
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-        self.env.seed(seed)
-        self.env.action_space.seed(seed)
-        self.env.observation_space.seed(seed)
+env_id = "PongNoFrameskip-v4"
 
-        self.device = torch.device("cuda" if cuda and torch.cuda.is_available() else "cpu")
+# Create environments.
+env = utils.AtariWrapper(gym.make(env_id))
 
-        # Replay memory which is memory-efficient to store stacked frames.
-        self.memory = utils.LazyMultiStepMemory(memory_size, self.env.observation_space.shape, self.device, gamma)
+# Create the agent and run.
 
-        self.steps = 0
-        self.learning_steps = 0
-        self.episodes = 0
-        self.num_actions = self.env.action_space.n
-        self.num_steps = num_steps
-        self.batch_size = batch_size
-
-        self.log_interval = log_interval
-        self.gamma = gamma
-        self.start_steps = start_steps
-        self.epsilon_train = epsilon_train
-        self.epsilon_decay_steps = epsilon_decay_steps
-        self.update_interval = update_interval
-        self.target_update_interval = target_update_interval
-        self.max_episode_steps = max_episode_steps
-
-        # Online network.
-        self.online_net = IQN(
-            num_channels=env.observation_space.shape[2], num_actions=self.num_actions, K=K, num_cosines=num_cosines
-        ).to(self.device)
-        # Target network.
-        self.target_net = IQN(
-            num_channels=env.observation_space.shape[2], num_actions=self.num_actions, K=K, num_cosines=num_cosines
-        ).to(self.device)
-
-        # Copy parameters of the learning network to the target network.
-        self.target_net.load_state_dict(self.online_net.state_dict())
-        # Disable calculations of gradients of the target network.
-        for param in self.target_net.parameters():
-            param.requires_grad = False
-
-        self.optim = Adam(self.online_net.parameters(), lr=lr, eps=1e-2 / batch_size)
-
-        self.N = N
-        self.N_dash = N_dash
-        self.K = K
-        self.num_cosines = num_cosines
-        self.kappa = kappa
-
-    def run(self):
-        while True:
-            self.train_episode()
-            if self.steps > self.num_steps:
-                break
-
-    def train_episode(self):
-        self.online_net.train()
-        self.target_net.train()
-
-        self.episodes += 1
-        episode_return = 0.0
-        episode_steps = 0
-
-        done = False
-        observation = self.env.reset()
-
-        while (not done) and episode_steps <= self.max_episode_steps:
-            # Use e-greedy for evaluation.
-            epsilon = max(self.epsilon_train, 1 - (1 - self.epsilon_train) / self.epsilon_decay_steps * self.steps)
-            if self.steps < self.start_steps or np.random.rand() < epsilon:
-                action = self.env.action_space.sample()
-            else:
-                observation_ = torch.ByteTensor(observation).unsqueeze(0).to(self.device).float().permute(0, 3, 1, 2) / 255.0
-                with torch.no_grad():
-                    embeddings = self.online_net.compute_embeddings(observation_)
-                    action = self.online_net.compute_q_values(embeddings).argmax().item()
-
-            next_observation, reward, done, _ = self.env.step(action)
-
-            # To calculate efficiently, I just set priority=max_priority here.
-            self.memory.append(observation, action, reward, next_observation, done)
-
-            self.steps += 1
-            episode_steps += 1
-            episode_return += reward
-            observation = next_observation
-
-            if self.steps % self.target_update_interval == 0:
-                self.target_net.load_state_dict(self.online_net.state_dict())
-
-            if self.steps % self.update_interval == 0 and self.steps >= self.start_steps:
-                self.learn()
-
-        print(f"Episode: {self.episodes:<4}  " f"episode steps: {episode_steps:<4}  " f"return: {episode_return:<5.1f}")
-
-    def __del__(self):
-        self.env.close()
-
-    def learn(self):
-        self.learning_steps += 1
-        observations, actions, rewards, next_observations, dones = self.memory.sample(self.batch_size)
-
-        # Compute the embeddings
-        embeddings = self.online_net.compute_embeddings(observations)
-
-        # Sample fractions.
-        taus = torch.rand(self.batch_size, self.N, dtype=embeddings.dtype, device=embeddings.device)
-        # Calculate quantile values of current states and actions at tau_hats.
-        current_sa_quantiles = evaluate_quantile_at_action(
-            self.online_net.compute_quantiles(embeddings, taus), actions
-        )  # (self.batch_size, self.N, 1)
-
-        with torch.no_grad():
-            # Calculate Q values of next states.
-            next_embeddings = self.target_net.compute_embeddings(next_observations)
-            next_q_value = self.target_net.compute_q_values(next_embeddings)
-
-            # Calculate greedy actions.
-            next_actions = torch.argmax(next_q_value, dim=1, keepdim=True)  # (self.batch_size, 1)
-
-            # Sample next fractions.
-            tau_dashes = torch.rand(self.batch_size, self.N_dash, dtype=embeddings.dtype, device=embeddings.device)
-
-            # Calculate quantile values of next states and next actions.
-            next_sa_quantiles = evaluate_quantile_at_action(
-                self.target_net.compute_quantiles(next_embeddings, tau_dashes), next_actions
-            ).transpose(
-                1, 2
-            )  # (self.batch_size, 1, self.N_dash)
-
-            # Calculate target quantile values.
-            target_sa_quantiles = (
-                rewards[..., None] + (1.0 - dones[..., None]) * self.gamma * next_sa_quantiles
-            )  # (self.batch_size, 1, self.N_dash)
-
-        td_errors = target_sa_quantiles - current_sa_quantiles
-        quantile_loss = calculate_quantile_huber_loss(td_errors, taus, self.kappa)
-
-        self.optim.zero_grad()
-        quantile_loss.backward()
-        self.optim.step()
+num_steps = 10_000  # 50_000_000
+batch_size = 32
+N = 64
+N_dash = 64
+K = 32
+num_cosines = 64
+kappa = 1.0
+lr = 5e-5
+memory_size = 1_000_000
+gamma = 0.99
+update_interval = 4
+target_update_interval = 10_000
+start_steps = 5_000  # 50_000
+epsilon_train = 0.01
+epsilon_decay_steps = 250_000
+log_interval = 100
+max_episode_steps = 27_000
+cuda = True
+seed = 0
 
 
-if __name__ == "__main__":
-    import gym
+torch.manual_seed(seed)
+np.random.seed(seed)
+env.seed(seed)
+env.action_space.seed(seed)
+env.observation_space.seed(seed)
 
-    net = CosineEmbeddingNetwork()
-    x = torch.randint(0, 3, (4, 3))
-    print(net(x).shape)
-    env_id = "PongNoFrameskip-v4"
+device = torch.device("cuda" if cuda and torch.cuda.is_available() else "cpu")
 
-    # Create environments.
-    env = utils.AtariWrapper(gym.make(env_id))
+# Replay memory which is memory-efficient to store stacked frames.
+memory = LazyMultiStepMemory(memory_size, env.observation_space.shape, device)
 
-    # Create the agent and run.
-    agent = IQNAgent(env=env, num_steps=10_000, start_steps=5_000)
-    agent.run()
+steps = 0
+learning_steps = 0
+episodes = 0
+num_actions = env.action_space.n
+num_steps = num_steps
+batch_size = batch_size
+
+# Online network.
+online_net = IQN(num_channels=env.observation_space.shape[2], num_actions=num_actions, K=K, num_cosines=num_cosines).to(device)
+# Target network.
+target_net = IQN(num_channels=env.observation_space.shape[2], num_actions=num_actions, K=K, num_cosines=num_cosines).to(device)
+
+# Copy parameters of the learning network to the target network.
+target_net.load_state_dict(online_net.state_dict())
+# Disable calculations of gradients of the target network.
+for param in target_net.parameters():
+    param.requires_grad = False
+
+optim = Adam(online_net.parameters(), lr=lr, eps=1e-2 / batch_size)
+
+
+while True:
+    online_net.train()
+    target_net.train()
+
+    episodes += 1
+    episode_return = 0.0
+    episode_steps = 0
+
+    done = False
+    observation = env.reset()
+
+    while (not done) and episode_steps <= max_episode_steps:
+        # Use e-greedy for evaluation.
+        epsilon = max(epsilon_train, 1 - (1 - epsilon_train) / epsilon_decay_steps * steps)
+        if steps < start_steps or np.random.rand() < epsilon:
+            action = env.action_space.sample()
+        else:
+            observation_ = torch.ByteTensor(observation).unsqueeze(0).to(device).float().permute(0, 3, 1, 2) / 255.0
+            with torch.no_grad():
+                embeddings = online_net.compute_embeddings(observation_)
+                action = online_net.compute_q_values(embeddings).argmax().item()
+
+        next_observation, reward, done, _ = env.step(action)
+
+        # To calculate efficiently, I just set priority=max_priority here.
+        memory.append(observation, action, reward, next_observation, done)
+
+        steps += 1
+        episode_steps += 1
+        episode_return += reward
+        observation = next_observation
+
+        if steps % target_update_interval == 0:
+            target_net.load_state_dict(online_net.state_dict())
+
+        if steps % update_interval == 0 and steps >= start_steps:
+            learning_steps += 1
+            observations, actions, rewards, next_observations, dones = memory.sample(batch_size)
+
+            # Compute the embeddings
+            embeddings = online_net.compute_embeddings(observations)
+
+            # Sample fractions.
+            taus = torch.rand(batch_size, N, dtype=embeddings.dtype, device=embeddings.device)
+            # Calculate quantile values of current states and actions at tau_hats.
+            current_sa_quantiles = evaluate_quantile_at_action(
+                online_net.compute_quantiles(embeddings, taus), actions
+            )  # (batch_size, N, 1)
+
+            with torch.no_grad():
+                # Calculate Q values of next states.
+                next_embeddings = target_net.compute_embeddings(next_observations)
+                next_q_value = target_net.compute_q_values(next_embeddings)
+
+                # Calculate greedy actions.
+                next_actions = torch.argmax(next_q_value, dim=1, keepdim=True)  # (batch_size, 1)
+
+                # Sample next fractions.
+                tau_dashes = torch.rand(batch_size, N_dash, dtype=embeddings.dtype, device=embeddings.device)
+
+                # Calculate quantile values of next states and next actions.
+                next_sa_quantiles = evaluate_quantile_at_action(
+                    target_net.compute_quantiles(next_embeddings, tau_dashes), next_actions
+                ).transpose(
+                    1, 2
+                )  # (batch_size, 1, N_dash)
+
+                # Calculate target quantile values.
+                target_sa_quantiles = (
+                    rewards[..., None] + (1.0 - dones[..., None]) * gamma * next_sa_quantiles
+                )  # (batch_size, 1, N_dash)
+
+            td_errors = target_sa_quantiles - current_sa_quantiles
+            quantile_loss = calculate_quantile_huber_loss(td_errors, taus, kappa)
+
+            optim.zero_grad()
+            quantile_loss.backward()
+            optim.step()
+
+    print(f"Episode: {episodes:<4}  " f"episode steps: {episode_steps:<4}  " f"return: {episode_return:<5.1f}")
+    if steps > num_steps:
+        break
+
+env.close()
