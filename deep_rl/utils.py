@@ -80,6 +80,31 @@ ATARI_IDS = [
 ]
 
 
+class StickyActionWrapper(gym.Wrapper):
+    """
+    Sticky action.
+
+    Args:
+        env (gym.Env): Environment to wrap
+        action_repeat_probability (float): Probability of repeating the previous action
+    """
+
+    def __init__(self, env: gym.Env, action_repeat_probability: float) -> None:
+        super().__init__(env)
+        self.action_repeat_probability = action_repeat_probability
+
+    def reset(self) -> np.ndarray:
+        self.previous_action = None
+        return super().reset()
+
+    def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
+        if self.previous_action is not None:
+            if self.np_random.random() < self.action_repeat_probability:
+                action = self.previous_action
+        self.previous_action = action
+        return self.env.step(action)
+
+
 class NoopResetWrapper(gym.Wrapper):
     """
     Sample initial states by taking random number of no-ops on reset. No-op is assumed to be action 0.
@@ -125,31 +150,6 @@ class FireResetWrapper(gym.Wrapper):
         if done:
             obs = self.env.reset()
         return obs
-
-
-class StickyActionWrapper(gym.Wrapper):
-    """
-    Sticky action.
-
-    Args:
-        env (gym.Env): Environment to wrap
-        action_repeat_probability (float): Probability of repeating the previous action
-    """
-
-    def __init__(self, env: gym.Env, action_repeat_probability: float) -> None:
-        super().__init__(env)
-        self.action_repeat_probability = action_repeat_probability
-
-    def reset(self) -> np.ndarray:
-        self.previous_action = None
-        return super().reset()
-
-    def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
-        if self.previous_action is not None:
-            if self.np_random.random() < self.action_repeat_probability:
-                action = self.previous_action
-        self.previous_action = action
-        return self.env.step(action)
 
 
 class EpisodicLifeWrapper(gym.Wrapper):
@@ -278,9 +278,9 @@ class AtariWrapper(gym.Wrapper):
     Atari 2600 preprocessings.
 
     Includes:
+        - Sticky action
         - Noop reset
         - Fire reset
-        - Sticky action
         - Maxpool and frame skip
         - Episodic life
         - Grayscale and resize
@@ -308,11 +308,14 @@ class AtariWrapper(gym.Wrapper):
         terminal_on_life_loss: bool = True,
         clip_reward: bool = True,
     ) -> None:
-        env = NoopResetWrapper(env, noop_max=noop_max)
+        if action_repeat_probability > 0.0:
+            env = StickyActionWrapper(env, action_repeat_probability)
+        if noop_max > 0:
+            env = NoopResetWrapper(env, noop_max=noop_max)
         if "FIRE" in env.unwrapped.get_action_meanings():
             env = FireResetWrapper(env)
-        env = StickyActionWrapper(env, action_repeat_probability)
-        env = MaxAndSkipWrapper(env, frame_skip)
+        if frame_skip > 1:
+            env = MaxAndSkipWrapper(env, frame_skip)
         if terminal_on_life_loss:
             env = EpisodicLifeWrapper(env)
         env = GrayscaleWrapper(env)
@@ -320,106 +323,3 @@ class AtariWrapper(gym.Wrapper):
         if clip_reward:
             env = ClipRewardEnv(env)
         super().__init__(env)
-
-
-class LazyMultiStepMemory(dict):
-    state_keys = ["state", "next_state"]
-    np_keys = ["action", "reward", "done"]
-    keys = state_keys + np_keys
-
-    def __init__(self, capacity, state_shape, device, gamma=0.99):
-        self.capacity = int(capacity)
-        self.state_shape = state_shape
-        self.device = device
-        self.reset()
-        self.gamma = gamma
-
-    def reset(self):
-        self["state"] = []
-        self["next_state"] = []
-
-        self["action"] = np.empty((self.capacity, 1), dtype=np.int64)
-        self["reward"] = np.empty((self.capacity, 1), dtype=np.float32)
-        self["done"] = np.empty((self.capacity, 1), dtype=np.float32)
-
-        self._n = 0
-        self._p = 0
-
-    def append(self, state, action, reward, next_state, done):
-        self["state"].append(state)
-        self["next_state"].append(next_state)
-        self["action"][self._p] = action
-        self["reward"][self._p] = reward
-        self["done"][self._p] = done
-
-        self._n = min(self._n + 1, self.capacity)
-        self._p = (self._p + 1) % self.capacity
-
-        self.truncate()
-
-    def truncate(self):
-        while len(self) > self.capacity:
-            del self["state"][0]
-            del self["next_state"][0]
-
-    def sample(self, batch_size):
-        indices = np.random.randint(low=0, high=len(self), size=batch_size)
-        return self._sample(indices, batch_size)
-
-    def _sample(self, indices, batch_size):
-        bias = -self._p if self._n == self.capacity else 0
-
-        states = np.empty((batch_size, *self.state_shape), dtype=np.uint8)
-        next_states = np.empty((batch_size, *self.state_shape), dtype=np.uint8)
-
-        for i, index in enumerate(indices):
-            _index = np.mod(index + bias, self.capacity)
-            states[i, ...] = self["state"][_index]
-            next_states[i, ...] = self["next_state"][_index]
-
-        states = torch.ByteTensor(states).to(self.device).float().permute(0, 3, 1, 2) / 255.0
-        next_states = torch.ByteTensor(next_states).to(self.device).float().permute(0, 3, 1, 2) / 255.0
-        actions = torch.LongTensor(self["action"][indices]).to(self.device)
-        rewards = torch.FloatTensor(self["reward"][indices]).to(self.device)
-        dones = torch.FloatTensor(self["done"][indices]).to(self.device)
-
-        return states, actions, rewards, next_states, dones
-
-    def __len__(self):
-        return len(self["state"])
-
-    def get(self):
-        return dict(self)
-
-    def load(self, memory):
-        for key in self.state_keys:
-            self[key].extend(memory[key])
-
-        num_data = len(memory["state"])
-        if self._p + num_data <= self.capacity:
-            for key in self.np_keys:
-                self[key][self._p : self._p + num_data] = memory[key]
-        else:
-            mid_index = self.capacity - self._p
-            end_index = num_data - mid_index
-            for key in self.np_keys:
-                self[key][self._p :] = memory[key][:mid_index]
-                self[key][:end_index] = memory[key][mid_index:]
-
-        self._n = min(self._n + num_data, self.capacity)
-        self._p = (self._p + num_data) % self.capacity
-        self.truncate()
-        assert self._n == len(self)
-
-
-if __name__ == "__main__":
-    for env_id in ATARI_IDS:
-        env = gym.make(env_id)
-        env = AtariWrapper(env)
-        env.reset()
-        done = False
-        for _ in range(1000):
-            _, _, done, _ = env.step(env.action_space.sample())
-            if done:
-                env.reset()
-            env.render()
