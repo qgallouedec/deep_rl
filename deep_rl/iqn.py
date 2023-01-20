@@ -1,62 +1,25 @@
+from typing import Any, Dict, Tuple
+
+import gym
 import numpy as np
 import torch
-from torch import Tensor, nn
-from torch.optim import Adam
-
 import utils
+from torch import Tensor, nn, optim
 
 
-class LazyMultiStepMemory(dict):
-    state_keys = ["state", "next_state"]
-    np_keys = ["action", "reward", "done"]
-    keys = state_keys + np_keys
+class TorchWrapper(gym.Wrapper):
+    """
+    Torch wrapper. Actions and observations are Tensors instead of arrays.
+    """
 
-    def __init__(self, capacity, state_shape, device):
-        self.capacity = int(capacity)
-        self.state_shape = state_shape
-        self.device = device
-        self["state"] = []
-        self["next_state"] = []
-        self["action"] = np.empty((self.capacity, 1), dtype=np.int64)
-        self["reward"] = np.empty((self.capacity, 1), dtype=np.float32)
-        self["done"] = np.empty((self.capacity, 1), dtype=np.float32)
+    def step(self, action: Tensor) -> Tuple[Tensor, float, bool, Dict[str, Any]]:
+        action = action.cpu().numpy()
+        observation, reward, done, info = self.env.step(action)
+        return torch.tensor(observation), reward, done, info
 
-        self._n = 0
-        self._p = 0
-
-    def append(self, state, action, reward, next_state, done):
-        self["state"].append(state)
-        self["next_state"].append(next_state)
-        self["action"][self._p] = action
-        self["reward"][self._p] = reward
-        self["done"][self._p] = done
-
-        self._n = min(self._n + 1, self.capacity)
-        self._p = (self._p + 1) % self.capacity
-        # Truncate
-        while len(self["state"]) > self.capacity:
-            del self["state"][0]
-            del self["next_state"][0]
-
-    def sample(self, batch_size):
-        indices = np.random.randint(low=0, high=len(self["state"]), size=batch_size)
-        bias = -self._p if self._n == self.capacity else 0
-
-        states = np.empty((batch_size, *self.state_shape), dtype=np.uint8)
-        next_states = np.empty((batch_size, *self.state_shape), dtype=np.uint8)
-
-        for i, index in enumerate(indices):
-            _index = np.mod(index + bias, self.capacity)
-            states[i, ...] = self["state"][_index]
-            next_states[i, ...] = self["next_state"][_index]
-
-        states = torch.ByteTensor(states).to(self.device).float().permute(0, 3, 1, 2) / 255.0
-        next_states = torch.ByteTensor(next_states).to(self.device).float().permute(0, 3, 1, 2) / 255.0
-        actions = torch.LongTensor(self["action"][indices]).to(self.device)
-        rewards = torch.FloatTensor(self["reward"][indices]).to(self.device)
-        dones = torch.FloatTensor(self["done"][indices]).to(self.device)
-
-        return states, actions, rewards, next_states, dones
+    def reset(self) -> Tensor:
+        observation = self.env.reset()
+        return torch.tensor(observation)
 
 
 def initialize_weights_he(m):
@@ -155,12 +118,11 @@ class QuantileNetwork(nn.Module):
 
 
 class IQN(nn.Module):
-    def __init__(self, num_channels, num_actions, K=32, num_cosines=32, embedding_dim=7 * 7 * 64):
+    def __init__(self, env, K=32, num_cosines=32, embedding_dim=7 * 7 * 64):
         super().__init__()
-
         # Feature extractor of DQN.
         self.dqn_net = nn.Sequential(
-            nn.Conv2d(num_channels, 32, kernel_size=8, stride=4),
+            nn.Conv2d(env.observation_space.shape[2], 32, kernel_size=8, stride=4),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=4, stride=2),
             nn.ReLU(),
@@ -171,13 +133,9 @@ class IQN(nn.Module):
         # Cosine embedding network.
         self.cosine_net = CosineEmbeddingNetwork(num_cosines=num_cosines, embedding_dim=embedding_dim)
         # Quantile network.
-        self.quantile_net = QuantileNetwork(num_actions=num_actions)
+        self.quantile_net = QuantileNetwork(num_actions=env.action_space.n)
 
         self.K = K
-        self.num_channels = num_channels
-        self.num_actions = num_actions
-        self.num_cosines = num_cosines
-        self.embedding_dim = embedding_dim
 
     def compute_embeddings(self, observations: Tensor) -> Tensor:
         return self.dqn_net(observations)
@@ -200,14 +158,22 @@ class IQN(nn.Module):
         return q_values
 
 
-def evaluate_quantile_at_action(s_quantiles, actions):
-    assert s_quantiles.shape[0] == actions.shape[0]
+def evaluate_quantile_at_action(s_quantiles: Tensor, actions: Tensor) -> Tensor:
+    """
+    Retrieves the quantile values at the specified actions.
 
+    Args:
+        s_quantiles (Tensor): A tensor of shape (batch_size, N, num_quantiles) representing the quantiles for each state.
+        actions (Tensor): A tensor of shape (batch_size, 1) representing the actions to evaluate the quantiles at.
+
+    Returns:
+        Tensor: A tensor of shape (batch_size, N, 1) representing the quantile values at the specified actions.
+    """
     batch_size = s_quantiles.shape[0]
     N = s_quantiles.shape[1]
 
     # Expand actions into (batch_size, N, 1).
-    action_index = actions[..., None].expand(batch_size, N, 1)
+    action_index = actions[..., None, None].expand(batch_size, N, 1)
 
     # Calculate quantile values at specified actions.
     sa_quantiles = s_quantiles.gather(dim=2, index=action_index)
@@ -240,72 +206,70 @@ def calculate_quantile_huber_loss(td_errors, taus, kappa):
     return quantile_huber_loss
 
 
-import gym
-
 env_id = "PongNoFrameskip-v4"
 
-# Create environments.
-env = utils.AtariWrapper(gym.make(env_id))
+total_timesteps = 10_000  # 50_000_000
+learning_starts = 5_000  # 50_000
+
+batch_size = 32
+learning_rate = 5e-5
+gamma = 0.99
+train_frequency = 4
+target_network_frequency = 10_000
+
+# Env setup
+env = TorchWrapper(utils.AtariWrapper(gym.make(env_id)))
 
 # Create the agent and run.
 
-num_steps = 10_000  # 50_000_000
-batch_size = 32
+
 N = 64
 N_dash = 64
 K = 32
 num_cosines = 64
 kappa = 1.0
-lr = 5e-5
 memory_size = 1_000_000
-gamma = 0.99
-update_interval = 4
-target_update_interval = 10_000
-start_steps = 5_000  # 50_000
-epsilon_train = 0.01
-epsilon_decay_steps = 250_000
-log_interval = 100
+
+start_e = 1
+end_e = 0.01
+exploration_fraction = 25
+slope = (end_e - start_e) / (exploration_fraction * total_timesteps)
+
 max_episode_steps = 27_000
-cuda = True
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 seed = 0
-
-
 torch.manual_seed(seed)
 np.random.seed(seed)
 env.seed(seed)
 env.action_space.seed(seed)
 env.observation_space.seed(seed)
 
-device = torch.device("cuda" if cuda and torch.cuda.is_available() else "cpu")
 
-# Replay memory which is memory-efficient to store stacked frames.
-memory = LazyMultiStepMemory(memory_size, env.observation_space.shape, device)
+observations = torch.empty((memory_size, *env.observation_space.shape), dtype=torch.uint8)
+next_observations = torch.empty((memory_size, *env.observation_space.shape), dtype=torch.uint8)
+actions = torch.empty(memory_size, dtype=torch.long)
+rewards = torch.empty(memory_size, dtype=torch.float32)
+dones = torch.empty(memory_size, dtype=torch.float32)
 
-steps = 0
+global_step = 0
 learning_steps = 0
 episodes = 0
-num_actions = env.action_space.n
-num_steps = num_steps
-batch_size = batch_size
 
 # Online network.
-online_net = IQN(num_channels=env.observation_space.shape[2], num_actions=num_actions, K=K, num_cosines=num_cosines).to(device)
+online_net = IQN(env, K=K, num_cosines=num_cosines).to(device)
 # Target network.
-target_net = IQN(num_channels=env.observation_space.shape[2], num_actions=num_actions, K=K, num_cosines=num_cosines).to(device)
+target_net = IQN(env, K=K, num_cosines=num_cosines).to(device)
 
 # Copy parameters of the learning network to the target network.
 target_net.load_state_dict(online_net.state_dict())
-# Disable calculations of gradients of the target network.
-for param in target_net.parameters():
-    param.requires_grad = False
 
-optim = Adam(online_net.parameters(), lr=lr, eps=1e-2 / batch_size)
+
+optimizer = optim.Adam(online_net.parameters(), lr=learning_rate, eps=1e-2 / batch_size)
 
 
 while True:
-    online_net.train()
-    target_net.train()
-
     episodes += 1
     episode_return = 0.0
     episode_steps = 0
@@ -315,74 +279,80 @@ while True:
 
     while (not done) and episode_steps <= max_episode_steps:
         # Use e-greedy for evaluation.
-        epsilon = max(epsilon_train, 1 - (1 - epsilon_train) / epsilon_decay_steps * steps)
-        if steps < start_steps or np.random.rand() < epsilon:
-            action = env.action_space.sample()
+        epsilon = max(slope * global_step + start_e, end_e)
+        if global_step < learning_starts or np.random.rand() < epsilon:
+            action = torch.tensor(env.action_space.sample())
         else:
-            observation_ = torch.ByteTensor(observation).unsqueeze(0).to(device).float().permute(0, 3, 1, 2) / 255.0
+            observation_ = observation.unsqueeze(0).to(device).float().permute(0, 3, 1, 2) / 255.0
             with torch.no_grad():
                 embeddings = online_net.compute_embeddings(observation_)
-                action = online_net.compute_q_values(embeddings).argmax().item()
+                action = online_net.compute_q_values(embeddings).argmax()
 
         next_observation, reward, done, _ = env.step(action)
 
         # To calculate efficiently, I just set priority=max_priority here.
-        memory.append(observation, action, reward, next_observation, done)
+        observations[global_step % memory_size] = observation
+        next_observations[global_step % memory_size] = next_observation
+        actions[global_step % memory_size] = action
+        rewards[global_step % memory_size] = reward
+        dones[global_step % memory_size] = done
 
-        steps += 1
+        global_step += 1
         episode_steps += 1
         episode_return += reward
         observation = next_observation
 
-        if steps % target_update_interval == 0:
+        if global_step % target_network_frequency == 0:
             target_net.load_state_dict(online_net.state_dict())
 
-        if steps % update_interval == 0 and steps >= start_steps:
+        if global_step % train_frequency == 0 and global_step >= learning_starts:
             learning_steps += 1
-            observations, actions, rewards, next_observations, dones = memory.sample(batch_size)
+            batch_inds = np.random.randint(global_step, size=batch_size)
+            b_observations = observations[batch_inds].to(device).float().permute(0, 3, 1, 2) / 255.0
+            b_next_observations = next_observations[batch_inds].to(device).float().permute(0, 3, 1, 2) / 255.0
+            b_actions = actions[batch_inds].to(device)
+            b_rewards = rewards[batch_inds].to(device)
+            b_dones = dones[batch_inds].to(device)
 
             # Compute the embeddings
-            embeddings = online_net.compute_embeddings(observations)
+            embeddings = online_net.compute_embeddings(b_observations)
 
-            # Sample fractions.
+            # Sample fractions
             taus = torch.rand(batch_size, N, dtype=embeddings.dtype, device=embeddings.device)
             # Calculate quantile values of current states and actions at tau_hats.
-            current_sa_quantiles = evaluate_quantile_at_action(
-                online_net.compute_quantiles(embeddings, taus), actions
-            )  # (batch_size, N, 1)
+            quantiles = online_net.compute_quantiles(embeddings, taus)
+            current_sa_quantiles = evaluate_quantile_at_action(quantiles, b_actions)  # (batch_size, N, 1)
 
             with torch.no_grad():
                 # Calculate Q values of next states.
-                next_embeddings = target_net.compute_embeddings(next_observations)
+                next_embeddings = target_net.compute_embeddings(b_next_observations)
                 next_q_value = target_net.compute_q_values(next_embeddings)
 
                 # Calculate greedy actions.
-                next_actions = torch.argmax(next_q_value, dim=1, keepdim=True)  # (batch_size, 1)
+                next_actions = torch.argmax(next_q_value, dim=1)  # (batch_size,)
 
                 # Sample next fractions.
                 tau_dashes = torch.rand(batch_size, N_dash, dtype=embeddings.dtype, device=embeddings.device)
 
                 # Calculate quantile values of next states and next actions.
-                next_sa_quantiles = evaluate_quantile_at_action(
-                    target_net.compute_quantiles(next_embeddings, tau_dashes), next_actions
-                ).transpose(
-                    1, 2
-                )  # (batch_size, 1, N_dash)
+                target_quantile = target_net.compute_quantiles(next_embeddings, tau_dashes)
+                next_sa_quantiles = evaluate_quantile_at_action(target_quantile, next_actions)
+                next_sa_quantiles = next_sa_quantiles.transpose(1, 2)  # (batch_size, 1, N_dash)
 
                 # Calculate target quantile values.
                 target_sa_quantiles = (
-                    rewards[..., None] + (1.0 - dones[..., None]) * gamma * next_sa_quantiles
+                    b_rewards[..., None, None] + (1.0 - b_dones[..., None, None]) * gamma * next_sa_quantiles
                 )  # (batch_size, 1, N_dash)
 
             td_errors = target_sa_quantiles - current_sa_quantiles
             quantile_loss = calculate_quantile_huber_loss(td_errors, taus, kappa)
 
-            optim.zero_grad()
+            optimizer.zero_grad()
             quantile_loss.backward()
-            optim.step()
+            optimizer.step()
 
     print(f"Episode: {episodes:<4}  " f"episode steps: {episode_steps:<4}  " f"return: {episode_return:<5.1f}")
-    if steps > num_steps:
+    if global_step > total_timesteps:
         break
 
 env.close()
