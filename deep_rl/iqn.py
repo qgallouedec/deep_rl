@@ -49,7 +49,7 @@ class CosineEmbeddingNetwork(nn.Module):
 
     def forward(self, taus: Tensor) -> Tensor:
         """
-        Calculate the embeddings of tau values.
+        Compute the embeddings of tau values.
 
         Args:
             taus (Tensor): A tensor of shape (batch_size, N) representing the tau values.
@@ -140,9 +140,29 @@ class IQN(nn.Module):
     def compute_embeddings(self, observations: Tensor) -> Tensor:
         return self.dqn_net(observations)
 
-    def compute_quantiles(self, embeddings: Tensor, taus: Tensor) -> Tensor:
+    def compute_quantile_at_action(self, embeddings: Tensor, taus: Tensor, actions: Tensor) -> Tensor:
+        """
+        Retrieves the quantile values at the specified actions.
+
+        Args:
+            s_quantiles (Tensor): A tensor of shape (batch_size, N, num_quantiles) representing the quantiles for each observation.
+            actions (Tensor): A tensor of shape (batch_size,) representing the actions to evaluate the quantiles at.
+
+        Returns:
+            Tensor: A tensor of shape (batch_size, N) representing the quantile values at the specified actions.
+        """
+        # Compute quantiles
         tau_embeddings = self.cosine_net(taus)
-        return self.quantile_net(embeddings, tau_embeddings)
+        s_quantiles = self.quantile_net(embeddings, tau_embeddings)
+
+        # Copy actions N times to get a tensor a shape (batch_size, N)
+        action_index = actions[..., None].expand(-1, s_quantiles.shape[1])
+
+        # Compute quantile values at specified actions. The notation seems eavy notation,
+        # but just select value of s_quantile (B, N, num_quantiles) with action_indexes (B, K).
+        # Output shape is thus (B, K)
+        sa_quantiles = s_quantiles.gather(dim=2, index=action_index.unsqueeze(-1)).squeeze(-1)
+        return sa_quantiles
 
     def compute_q_values(self, embeddings: Tensor) -> Tensor:
         batch_size = embeddings.shape[0]
@@ -151,77 +171,28 @@ class IQN(nn.Module):
         taus = torch.rand(batch_size, self.K, dtype=embeddings.dtype, device=embeddings.device)
 
         # Compute quantiles
-        quantiles = self.compute_quantiles(embeddings, taus)  # (batch_size, K, num_actions)
+        tau_embeddings = self.cosine_net(taus)
+        quantiles = self.quantile_net(embeddings, tau_embeddings)  # (batch_size, K, num_actions)
 
-        # Calculate expectations of value distributions.
-        q_values = torch.mean(quantiles, dim=1)  # (batch_size, num_actions)
-        return q_values
-
-
-def evaluate_quantile_at_action(s_quantiles: Tensor, actions: Tensor) -> Tensor:
-    """
-    Retrieves the quantile values at the specified actions.
-
-    Args:
-        s_quantiles (Tensor): A tensor of shape (batch_size, N, num_quantiles) representing the quantiles for each state.
-        actions (Tensor): A tensor of shape (batch_size, 1) representing the actions to evaluate the quantiles at.
-
-    Returns:
-        Tensor: A tensor of shape (batch_size, N, 1) representing the quantile values at the specified actions.
-    """
-    batch_size = s_quantiles.shape[0]
-    N = s_quantiles.shape[1]
-
-    # Expand actions into (batch_size, N, 1).
-    action_index = actions[..., None, None].expand(batch_size, N, 1)
-
-    # Calculate quantile values at specified actions.
-    sa_quantiles = s_quantiles.gather(dim=2, index=action_index)
-
-    return sa_quantiles
-
-
-def calculate_quantile_huber_loss(td_errors, taus, kappa):
-    assert not taus.requires_grad
-    batch_size, N, N_dash = td_errors.shape
-
-    # Calculate huber loss element-wisely.
-    element_wise_huber_loss = torch.where(
-        td_errors.abs() <= kappa, 0.5 * td_errors.pow(2), kappa * (td_errors.abs() - 0.5 * kappa)
-    )
-    assert element_wise_huber_loss.shape == (batch_size, N, N_dash)
-
-    # Calculate quantile huber loss element-wisely.
-    element_wise_quantile_huber_loss = (
-        torch.abs(taus[..., None] - (td_errors.detach() < 0).float()) * element_wise_huber_loss / kappa
-    )
-    assert element_wise_quantile_huber_loss.shape == (batch_size, N, N_dash)
-
-    # Quantile huber loss.
-    batch_quantile_huber_loss = element_wise_quantile_huber_loss.sum(dim=1).mean(dim=1, keepdim=True)
-    assert batch_quantile_huber_loss.shape == (batch_size, 1)
-
-    quantile_huber_loss = batch_quantile_huber_loss.mean()
-
-    return quantile_huber_loss
+        # Compute expectations of value distributions.
+        return torch.mean(quantiles, dim=1)  # (batch_size, num_actions)
 
 
 env_id = "PongNoFrameskip-v4"
 
-total_timesteps = 10_000  # 50_000_000
-learning_starts = 5_000  # 50_000
+total_timesteps = 7_000  # 50_000_000
+learning_starts = 3_000  # 50_000
 
-batch_size = 32
-learning_rate = 5e-5
-gamma = 0.99
+start_e = 1
+end_e = 0.01
+exploration_fraction = 25
+slope = (end_e - start_e) / (exploration_fraction * total_timesteps)
+
 train_frequency = 4
+batch_size = 32
+gamma = 0.99
+learning_rate = 5e-5
 target_network_frequency = 10_000
-
-# Env setup
-env = TorchWrapper(utils.AtariWrapper(gym.make(env_id)))
-
-# Create the agent and run.
-
 
 N = 64
 N_dash = 64
@@ -230,15 +201,12 @@ num_cosines = 64
 kappa = 1.0
 memory_size = 1_000_000
 
-start_e = 1
-end_e = 0.01
-exploration_fraction = 25
-slope = (end_e - start_e) / (exploration_fraction * total_timesteps)
+# Env setup
+env = utils.AtariWrapper(gym.make(env_id))
+env = gym.wrappers.RecordEpisodeStatistics(env)
+env = TorchWrapper(env)
 
-max_episode_steps = 27_000
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+# Seeding
 seed = 0
 torch.manual_seed(seed)
 np.random.seed(seed)
@@ -246,113 +214,112 @@ env.seed(seed)
 env.action_space.seed(seed)
 env.observation_space.seed(seed)
 
+# Device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-observations = torch.empty((memory_size, *env.observation_space.shape), dtype=torch.uint8)
-next_observations = torch.empty((memory_size, *env.observation_space.shape), dtype=torch.uint8)
-actions = torch.empty(memory_size, dtype=torch.long)
-rewards = torch.empty(memory_size, dtype=torch.float32)
-dones = torch.empty(memory_size, dtype=torch.float32)
-
-global_step = 0
-learning_steps = 0
-episodes = 0
-
-# Online network.
+# Network setup
 online_net = IQN(env, K=K, num_cosines=num_cosines).to(device)
-# Target network.
+optimizer = optim.Adam(online_net.parameters(), lr=learning_rate, eps=1e-2 / batch_size)
 target_net = IQN(env, K=K, num_cosines=num_cosines).to(device)
-
-# Copy parameters of the learning network to the target network.
 target_net.load_state_dict(online_net.state_dict())
 
+# Storage setup
+observations = torch.empty((memory_size, *env.observation_space.shape), dtype=torch.uint8)
+actions = torch.empty(memory_size, dtype=torch.long)
+rewards = torch.empty(memory_size, dtype=torch.float32)
+terminated = torch.empty(memory_size, dtype=torch.bool)
 
-optimizer = optim.Adam(online_net.parameters(), lr=learning_rate, eps=1e-2 / batch_size)
+# Initiate the envrionment and store the inital observation
+observation = env.reset()
+global_step = 0
+observations[global_step % memory_size] = observation
 
+# Loop
+while global_step < total_timesteps:
+    # Update exploration rate
+    epsilon = max(slope * global_step + start_e, end_e)
 
-while True:
-    episodes += 1
-    episode_return = 0.0
-    episode_steps = 0
+    if global_step < learning_starts or np.random.rand() < epsilon:
+        action = torch.tensor(env.action_space.sample())
+    else:
+        observation_ = observation.unsqueeze(0).to(device).float().permute(0, 3, 1, 2) / 255.0
+        with torch.no_grad():
+            embeddings = online_net.compute_embeddings(observation_)
+            action = online_net.compute_q_values(embeddings).argmax()
 
-    done = False
-    observation = env.reset()
+    # Store
+    actions[global_step % memory_size] = action
 
-    while (not done) and episode_steps <= max_episode_steps:
-        # Use e-greedy for evaluation.
-        epsilon = max(slope * global_step + start_e, end_e)
-        if global_step < learning_starts or np.random.rand() < epsilon:
-            action = torch.tensor(env.action_space.sample())
-        else:
-            observation_ = observation.unsqueeze(0).to(device).float().permute(0, 3, 1, 2) / 255.0
-            with torch.no_grad():
-                embeddings = online_net.compute_embeddings(observation_)
-                action = online_net.compute_q_values(embeddings).argmax()
+    # Step
+    observation, reward, done, info = env.step(action)
+    if done:
+        observation = env.reset()
 
-        next_observation, reward, done, _ = env.step(action)
+    # Update count
+    global_step += 1
 
-        # To calculate efficiently, I just set priority=max_priority here.
-        observations[global_step % memory_size] = observation
-        next_observations[global_step % memory_size] = next_observation
-        actions[global_step % memory_size] = action
-        rewards[global_step % memory_size] = reward
-        dones[global_step % memory_size] = done
+    observations[global_step % memory_size] = observation
+    rewards[global_step % memory_size] = reward
+    terminated[global_step % memory_size] = done and not info.get("TimeLimit.truncated", False)
 
-        global_step += 1
-        episode_steps += 1
-        episode_return += reward
-        observation = next_observation
+    if "episode" in info.keys():
+        print(f"global_step={global_step}, episodic_return={info['episode']['r']:.2f}")
 
-        if global_step % target_network_frequency == 0:
-            target_net.load_state_dict(online_net.state_dict())
-
-        if global_step % train_frequency == 0 and global_step >= learning_starts:
-            learning_steps += 1
+    # Optimize the agent
+    if global_step >= learning_starts:
+        if global_step % train_frequency == 0:
+            upper = min(global_step, memory_size)
             batch_inds = np.random.randint(global_step, size=batch_size)
-            b_observations = observations[batch_inds].to(device).float().permute(0, 3, 1, 2) / 255.0
-            b_next_observations = next_observations[batch_inds].to(device).float().permute(0, 3, 1, 2) / 255.0
+
+            b_observations = observations[batch_inds].to(device)
             b_actions = actions[batch_inds].to(device)
-            b_rewards = rewards[batch_inds].to(device)
-            b_dones = dones[batch_inds].to(device)
+            b_next_observations = observations[(batch_inds + 1) % memory_size].to(device)
+            b_rewards = rewards[(batch_inds + 1) % memory_size].to(device)
+            b_terminated = terminated[(batch_inds + 1) % memory_size].to(device)
+
+            # Normalize images and make them channel-first
+            b_observations = b_observations.float().permute(0, 3, 1, 2) / 255.0
+            b_next_observations = b_next_observations.float().permute(0, 3, 1, 2) / 255.0
 
             # Compute the embeddings
             embeddings = online_net.compute_embeddings(b_observations)
 
             # Sample fractions
-            taus = torch.rand(batch_size, N, dtype=embeddings.dtype, device=embeddings.device)
-            # Calculate quantile values of current states and actions at tau_hats.
-            quantiles = online_net.compute_quantiles(embeddings, taus)
-            current_sa_quantiles = evaluate_quantile_at_action(quantiles, b_actions)  # (batch_size, N, 1)
+            taus = torch.rand(batch_size, N, dtype=embeddings.dtype, device=device)
 
-            with torch.no_grad():
-                # Calculate Q values of next states.
-                next_embeddings = target_net.compute_embeddings(b_next_observations)
-                next_q_value = target_net.compute_q_values(next_embeddings)
+            # Compute quantile values of current observations and actions at tau_hats
+            current_sa_quantiles = online_net.compute_quantile_at_action(embeddings, taus, b_actions)
 
-                # Calculate greedy actions.
-                next_actions = torch.argmax(next_q_value, dim=1)  # (batch_size,)
+            # Compute Q values of next observations
+            next_embeddings = target_net.compute_embeddings(b_next_observations)
+            next_q_value = target_net.compute_q_values(next_embeddings)
 
-                # Sample next fractions.
-                tau_dashes = torch.rand(batch_size, N_dash, dtype=embeddings.dtype, device=embeddings.device)
+            # Compute greedy actions
+            next_actions = torch.argmax(next_q_value, dim=1)
 
-                # Calculate quantile values of next states and next actions.
-                target_quantile = target_net.compute_quantiles(next_embeddings, tau_dashes)
-                next_sa_quantiles = evaluate_quantile_at_action(target_quantile, next_actions)
-                next_sa_quantiles = next_sa_quantiles.transpose(1, 2)  # (batch_size, 1, N_dash)
+            # Sample next fractions
+            tau_dashes = torch.rand(batch_size, N_dash, dtype=embeddings.dtype, device=device)
 
-                # Calculate target quantile values.
-                target_sa_quantiles = (
-                    b_rewards[..., None, None] + (1.0 - b_dones[..., None, None]) * gamma * next_sa_quantiles
-                )  # (batch_size, 1, N_dash)
+            # Compute quantile values of next observations and next actions
+            next_sa_quantiles = online_net.compute_quantile_at_action(next_embeddings, tau_dashes, next_actions)
 
-            td_errors = target_sa_quantiles - current_sa_quantiles
-            quantile_loss = calculate_quantile_huber_loss(td_errors, taus, kappa)
+            # Compute target quantile values (batch_size, 1, N_dash)
+            target_sa_quantiles = b_rewards[..., None] + torch.logical_not(b_terminated)[..., None] * gamma * next_sa_quantiles
+
+            # TD-error is the cross differnce between the target quantiles and the currents quantiles
+            td_errors = target_sa_quantiles.unsqueeze(-2).detach() - current_sa_quantiles.unsqueeze(-1)
+
+            # Compute quantile Huber loss
+            huber_loss = torch.where(td_errors.abs() <= kappa, 0.5 * td_errors.pow(2), kappa * (td_errors.abs() - 0.5 * kappa))
+            quantile_huber_loss = torch.abs(taus[..., None] - (td_errors < 0).float()) * huber_loss
+            quantile_loss = torch.mean(quantile_huber_loss)
 
             optimizer.zero_grad()
             quantile_loss.backward()
             optimizer.step()
 
-    print(f"Episode: {episodes:<4}  " f"episode steps: {episode_steps:<4}  " f"return: {episode_return:<5.1f}")
-    if global_step > total_timesteps:
-        break
+        # Update the target network
+        if global_step % target_network_frequency == 0:
+            target_net.load_state_dict(online_net.state_dict())
 
 env.close()
