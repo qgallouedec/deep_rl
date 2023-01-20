@@ -220,7 +220,7 @@ class MaxAndSkipWrapper(gym.Wrapper):
         return max_frame, total_reward, done, info
 
 
-class ClipRewardEnv(gym.RewardWrapper):
+class ClipRewardWrapper(gym.RewardWrapper):
     """
     Clips the reward to {+1, 0, -1} by its sign.
 
@@ -321,5 +321,5 @@ class AtariWrapper(gym.Wrapper):
         env = GrayscaleWrapper(env)
         env = ResizeWrapper(env, width, height)
         if clip_reward:
-            env = ClipRewardEnv(env)
+            env = ClipRewardWrapper(env)
         super().__init__(env)
