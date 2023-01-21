@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import utils
 from torch import Tensor, nn, optim
+import wandb
 
 
 class TorchWrapper(gym.Wrapper):
@@ -129,14 +130,38 @@ gamma = 0.99
 learning_rate = 5e-5
 target_network_frequency = 10_000
 
-num_tau_samples = 63
+num_tau_samples = 64
 num_tau_prime_samples = 64
 num_quantile_samples = 32
 
-num_cosines = 62
+num_cosines = 64
 embedding_dim = 7 * 7 * 64
 kappa = 1.0
 memory_size = 1_000_000
+
+wandb.init(
+    project="IQN",
+    config=dict(
+        env_id=env_id,
+        total_timesteps=total_timesteps,
+        learning_starts=learning_starts,
+        start_e=start_e,
+        end_e=end_e,
+        exploration_fraction=exploration_fraction,
+        train_frequency=train_frequency,
+        batch_size=batch_size,
+        gamma=gamma,
+        learning_rate=learning_rate,
+        target_network_frequency=target_network_frequency,
+        num_tau_samples=num_tau_samples,
+        num_tau_prime_samples=num_tau_prime_samples,
+        num_quantile_samples=num_quantile_samples,
+        num_cosines=num_cosines,
+        embedding_dim=embedding_dim,
+        kappa=kappa,
+        memory_size=memory_size,
+    ),
+)
 
 # Env setup
 env = utils.AtariWrapper(gym.make(env_id))
@@ -220,6 +245,7 @@ while global_step < total_timesteps:
 
     if "episode" in info.keys():
         print(f"global_step={global_step}, episodic_return={info['episode']['r']:.2f}")
+        wandb.log(dict(global_step=global_step, episodic_return=info["episode"]["r"]))
 
     # Optimize the agent
     if global_step >= learning_starts:
