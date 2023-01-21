@@ -284,8 +284,9 @@ while global_step < total_timesteps:
 
             # Compute quantile Huber loss
             huber_loss = torch.where(td_errors.abs() <= kappa, 0.5 * td_errors.pow(2), kappa * (td_errors.abs() - 0.5 * kappa))
-            quantile_huber_loss = torch.abs(taus[..., None] - (td_errors < 0).float()) * huber_loss
-            quantile_loss = torch.mean(quantile_huber_loss)
+            quantile_huber_loss = torch.abs(taus[..., None] - (td_errors.detach() < 0).float()) * huber_loss / kappa
+            batch_quantile_huber_loss = torch.sum(quantile_huber_loss, dim=1)
+            quantile_loss = torch.mean(batch_quantile_huber_loss)
 
             optimizer.zero_grad()
             quantile_loss.backward()
