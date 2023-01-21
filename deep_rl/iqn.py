@@ -50,8 +50,8 @@ class CosineEmbeddingNetwork(nn.Module):
     """
     Computes the embeddings of tau values using cosine functions.
 
-    Take a tensor of shape (batch_size, N) representing the tau values, and return
-    a tensor of shape (batch_size, N, embedding_dim) representing the embeddings of tau values.
+    Take a tensor of shape (batch_size, num_tau_samples) representing the tau values, and return
+    a tensor of shape (batch_size, num_tau_samples, embedding_dim) representing the embeddings of tau values.
 
     Args:
         num_cosines (int): Number of cosines to use for embedding
@@ -65,19 +65,20 @@ class CosineEmbeddingNetwork(nn.Module):
             nn.ReLU(),
         )
         self.num_cosines = num_cosines
-        self.embedding_dim = embedding_dim
 
     def forward(self, taus: Tensor) -> Tensor:
         # Compute cos(i * pi * tau)
         i_pi = np.pi * torch.arange(start=1, end=self.num_cosines + 1, device=taus.device)
         i_pi = i_pi.reshape(1, 1, self.num_cosines)  # (1, 1, num_cosines)
-        taus = torch.unsqueeze(taus, dim=-1)  # (batch_size, N, 1)
-        cosines = torch.cos(taus * i_pi)  # (batch_size, N, num_cosines)
+        taus = torch.unsqueeze(taus, dim=-1)  # (batch_size, num_tau_samples, 1)
+        cosines = torch.cos(taus * i_pi)  # (batch_size, num_tau_samples, num_cosines)
 
         # Compute embeddings of taus
-        cosines = torch.flatten(cosines, end_dim=1)  # (batch_size * N, num_cosines)
-        tau_embeddings = self.net(cosines)  # (batch_size * N, embedding_dim)
-        return torch.unflatten(tau_embeddings, dim=0, sizes=(-1, taus.shape[1]))  # (batch_size, N, embedding_dim)
+        cosines = torch.flatten(cosines, end_dim=1)  # (batch_size * num_tau_samples, num_cosines)
+        tau_embeddings = self.net(cosines)  # (batch_size * num_tau_samples, embedding_dim)
+        return torch.unflatten(
+            tau_embeddings, dim=0, sizes=(-1, taus.shape[1])
+        )  # (batch_size, num_tau_samples, embedding_dim)
 
 
 class QuantileNetwork(nn.Module):
@@ -128,10 +129,11 @@ gamma = 0.99
 learning_rate = 5e-5
 target_network_frequency = 10_000
 
-N = 64
-N_dash = 64
-K = 32
-num_cosines = 64
+num_tau_samples = 63
+num_tau_prime_samples = 64
+num_quantile_samples = 32
+
+num_cosines = 62
 embedding_dim = 7 * 7 * 64
 kappa = 1.0
 memory_size = 1_000_000
@@ -194,10 +196,10 @@ while global_step < total_timesteps:
         with torch.no_grad():
             # Compute the embedding, sample fractions and compute quantiles
             embeddings = online_features_extractor(observation_)
-            taus = torch.rand(embeddings.shape[0], K, device=embeddings.device)
+            taus = torch.rand(1, num_quantile_samples, device=device)
             tau_embeddings = online_cosine_net(taus)
-            quantiles = online_quantile_net(embeddings, tau_embeddings)  # (batch_size, K, num_actions)
-        q_values = torch.mean(quantiles, dim=1)  # (batch_size, num_actions)
+            quantiles = online_quantile_net(embeddings, tau_embeddings).squeeze()  # (num_quantile_samples, num_actions)
+        q_values = torch.mean(quantiles, dim=0)  # (num_actions,)
         action = torch.argmax(q_values)
 
     # Store
@@ -237,39 +239,42 @@ while global_step < total_timesteps:
 
             # Sample fractions and compute quantile values of current observations and actions at taus
             embeddings = online_features_extractor(b_observations)
-            taus = torch.rand(batch_size, N, device=device)
+            taus = torch.rand(batch_size, num_tau_samples, device=device)
             tau_embeddings = online_cosine_net(taus)
             quantiles = online_quantile_net(embeddings, tau_embeddings)
 
             # Compute quantile values at specified actions. The notation seems eavy notation,
-            # but just select value of s_quantile (B, N, num_quantiles) with action_indexes (batch_size, K).
-            # Output shape is thus (batch_size, K)
-            action_index = b_actions[..., None].expand(-1, quantiles.shape[1])  # Copy actions to a shape (batch_size, N)
+            # but just select value of s_quantile (batch_size, num_tau_samples, num_quantiles) with
+            # action_indexes (batch_size, num_quantile_samples).
+            # Output shape is thus (batch_size, num_quantile_samples)
+            action_index = b_actions[..., None].expand(-1, num_tau_samples)  # Expand to (batch_size, num_tau_samples)
             current_action_quantiles = quantiles.gather(dim=2, index=action_index.unsqueeze(-1)).squeeze(-1)
 
             with torch.no_grad():
                 # Compute Q values of next observations
                 next_embeddings = target_features_extractor(b_next_observations)
-                next_taus = torch.rand(batch_size, K, device=device)
+                next_taus = torch.rand(batch_size, num_quantile_samples, device=device)
                 next_tau_embeddings = target_cosine_net(next_taus)
-                next_quantiles = target_quantile_net(next_embeddings, next_tau_embeddings)  # (batch_size, K, num_actions)
+                next_quantiles = target_quantile_net(
+                    next_embeddings, next_tau_embeddings
+                )  # (batch_size, num_quantile_samples, num_actions)
 
                 # Compute greedy actions
                 next_q_values = torch.mean(next_quantiles, dim=1)  # (batch_size, num_actions)
                 next_actions = torch.argmax(next_q_values, dim=1)
 
                 # Compute next quantiles
-                tau_dashes = torch.rand(batch_size, N_dash, device=device)
+                tau_dashes = torch.rand(batch_size, num_tau_prime_samples, device=device)
                 tau_dashes_embeddings = target_cosine_net(tau_dashes)
                 next_quantiles = target_quantile_net(next_embeddings, tau_dashes_embeddings)
 
                 # Compute quantile values at specified actions. The notation seems eavy notation,
-                # but just select value of s_quantile (B, N, num_quantiles) with action_indexes (batch_size, K).
-                # Output shape is thus (batch_size, K)
-                next_action_index = next_actions[..., None].expand(-1, next_quantiles.shape[1])
+                # but just select value of s_quantile (batch_size, num_tau_samples, num_quantiles) with action_indexes (batch_size, num_quantile_samples).
+                # Output shape is thus (batch_size, num_quantile_samples)
+                next_action_index = next_actions[..., None].expand(-1, num_tau_prime_samples)
                 next_action_quantiles = next_quantiles.gather(dim=2, index=next_action_index.unsqueeze(-1)).squeeze(-1)
 
-                # Compute target quantile values (batch_size, N_dash)
+                # Compute target quantile values (batch_size, num_tau_prime_samples)
                 target_action_quantiles = (
                     b_rewards[..., None] + torch.logical_not(b_terminated)[..., None] * gamma * next_action_quantiles
                 )
