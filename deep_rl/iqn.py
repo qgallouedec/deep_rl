@@ -114,12 +114,12 @@ class QuantileNetwork(nn.Module):
 
 env_id = "PongNoFrameskip-v4"
 
-total_timesteps = 7_000  # 50_000_000
-learning_starts = 3_000  # 50_000
+total_timesteps = 50_000_000
+learning_starts = 50_000
 
 start_e = 1
 end_e = 0.01
-exploration_fraction = 25
+exploration_fraction = 0.005
 slope = (end_e - start_e) / (exploration_fraction * total_timesteps)
 
 train_frequency = 4
