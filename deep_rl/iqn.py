@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import utils
 from torch import Tensor, nn, optim
+from PIL import Image
 
 
 class TorchWrapper(gym.Wrapper):
@@ -208,6 +209,8 @@ while global_step < total_timesteps:
     if done:
         observation = env.reset()
 
+    env.render()
+
     # Update count
     global_step += 1
 
@@ -247,34 +250,35 @@ while global_step < total_timesteps:
             action_index = b_actions[..., None].expand(-1, quantiles.shape[1])  # Copy actions to a shape (batch_size, N)
             current_action_quantiles = quantiles.gather(dim=2, index=action_index.unsqueeze(-1)).squeeze(-1)
 
-            # Compute Q values of next observations
-            next_embeddings = target_features_extractor(b_next_observations)
-            next_taus = torch.rand(next_embeddings.shape[0], K, device=embeddings.device)
-            next_tau_embeddings = target_cosine_net(next_taus)
-            next_quantiles = target_quantile_net(next_embeddings, next_tau_embeddings)  # (batch_size, K, num_actions)
+            with torch.no_grad():
+                # Compute Q values of next observations
+                next_embeddings = target_features_extractor(b_next_observations)
+                next_taus = torch.rand(batch_size, K, device=device)
+                next_tau_embeddings = target_cosine_net(next_taus)
+                next_quantiles = target_quantile_net(next_embeddings, next_tau_embeddings)  # (batch_size, K, num_actions)
 
-            # Compute greedy actions
-            next_q_values = torch.mean(next_quantiles, dim=1)  # (batch_size, num_actions)
-            next_actions = torch.argmax(next_q_values, dim=1)
+                # Compute greedy actions
+                next_q_values = torch.mean(next_quantiles, dim=1)  # (batch_size, num_actions)
+                next_actions = torch.argmax(next_q_values, dim=1)
 
-            # Compute next quantiles
-            tau_dashes = torch.rand(batch_size, N_dash, device=device)
-            tau_dashes_embeddings = online_cosine_net(tau_dashes)
-            next_quantiles = online_quantile_net(next_embeddings, tau_dashes_embeddings)
+                # Compute next quantiles
+                tau_dashes = torch.rand(batch_size, N_dash, device=device)
+                tau_dashes_embeddings = target_cosine_net(tau_dashes)
+                next_quantiles = target_quantile_net(next_embeddings, tau_dashes_embeddings)
 
-            # Compute quantile values at specified actions. The notation seems eavy notation,
-            # but just select value of s_quantile (B, N, num_quantiles) with action_indexes (batch_size, K).
-            # Output shape is thus (batch_size, K)
-            next_action_index = next_actions[..., None].expand(-1, next_quantiles.shape[1])
-            next_action_quantiles = next_quantiles.gather(dim=2, index=next_action_index.unsqueeze(-1)).squeeze(-1)
+                # Compute quantile values at specified actions. The notation seems eavy notation,
+                # but just select value of s_quantile (B, N, num_quantiles) with action_indexes (batch_size, K).
+                # Output shape is thus (batch_size, K)
+                next_action_index = next_actions[..., None].expand(-1, next_quantiles.shape[1])
+                next_action_quantiles = next_quantiles.gather(dim=2, index=next_action_index.unsqueeze(-1)).squeeze(-1)
 
-            # Compute target quantile values (batch_size, N_dash)
-            target_action_quantiles = (
-                b_rewards[..., None] + torch.logical_not(b_terminated)[..., None] * gamma * next_action_quantiles
-            )
+                # Compute target quantile values (batch_size, N_dash)
+                target_action_quantiles = (
+                    b_rewards[..., None] + torch.logical_not(b_terminated)[..., None] * gamma * next_action_quantiles
+                )
 
             # TD-error is the cross differnce between the target quantiles and the currents quantiles
-            td_errors = target_action_quantiles.unsqueeze(-2).detach() - current_action_quantiles.unsqueeze(-1)
+            td_errors = target_action_quantiles.unsqueeze(-2) - current_action_quantiles.unsqueeze(-1)
 
             # Compute quantile Huber loss
             huber_loss = torch.where(td_errors.abs() <= kappa, 0.5 * td_errors.pow(2), kappa * (td_errors.abs() - 0.5 * kappa))
