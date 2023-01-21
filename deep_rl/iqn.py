@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import utils
 from torch import Tensor, nn, optim
-from PIL import Image
 
 
 class TorchWrapper(gym.Wrapper):
@@ -208,8 +207,6 @@ while global_step < total_timesteps:
     observation, reward, done, info = env.step(action)
     if done:
         observation = env.reset()
-
-    env.render()
 
     # Update count
     global_step += 1
