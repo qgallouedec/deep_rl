@@ -116,13 +116,13 @@ class QuantileNetwork(nn.Module):
 
 env_id = "PongNoFrameskip-v4"
 
-total_timesteps = 50_000_000
+total_timesteps = 2_500_000
 learning_starts = 50_000
 
-start_e = 1
+start_e = 1.0
 end_e = 0.01
-exploration_fraction = 0.005
-slope = (end_e - start_e) / (exploration_fraction * total_timesteps)
+epsilon_decay_steps = 250_000
+slope = (end_e - start_e) / epsilon_decay_steps
 
 train_frequency = 4
 batch_size = 32
@@ -149,7 +149,7 @@ wandb.init(
         learning_starts=learning_starts,
         start_e=start_e,
         end_e=end_e,
-        exploration_fraction=exploration_fraction,
+        epsilon_decay_steps=epsilon_decay_steps,
         train_frequency=train_frequency,
         batch_size=batch_size,
         gamma=gamma,
@@ -172,12 +172,12 @@ env = gym.wrappers.RecordEpisodeStatistics(env)
 env = TorchWrapper(env)
 
 # Seeding
-seed = 0
-torch.manual_seed(seed)
-np.random.seed(seed)
-env.seed(seed)
-env.action_space.seed(seed)
-env.observation_space.seed(seed)
+# seed = 0
+# torch.manual_seed(seed)
+# np.random.seed(seed)
+# env.seed(seed)
+# env.action_space.seed(seed)
+# env.observation_space.seed(seed)
 
 # Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
