@@ -207,13 +207,13 @@ eval_interval = 250_000
 num_eval_steps = 125_000
 
 
-num_steps = 50_000  # 50_000_000
-lr = 5e-4  # 5e-5
-target_update_interval = 1_000  # 10_000
-start_steps = 500  # 50_000
-epsilon_decay_steps = 2_000  # 250_000
-eval_interval = 2_000  # 250_000
-num_eval_steps = 2_000  # 125_000
+# num_steps = 50_000  # 50_000_000
+# lr = 5e-4  # 5e-5
+# target_update_interval = 1_000  # 10_000
+# start_steps = 500  # 50_000
+# epsilon_decay_steps = 2_000  # 250_000
+# eval_interval = 2_000  # 250_000
+# num_eval_steps = 2_000  # 125_000
 wandb.init(
     project="IQN",
     config=dict(
