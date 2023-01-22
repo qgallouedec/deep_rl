@@ -1,88 +1,13 @@
-from collections import deque
-
 import cv2
 import gym
 import numpy as np
 import torch
-from gym import spaces
 from torch import nn, optim
-from utils import NoopResetWrapper, MaxAndSkipWrapper, EpisodicLifeWrapper, FireResetWrapper, ClipRewardWrapper
+from utils import AtariWrapper
+
 import wandb
 
 cv2.ocl.setUseOpenCL(False)
-
-
-class WarpFramePyTorch(gym.ObservationWrapper):
-    def __init__(self, env):
-        """
-        Warp frames to 84x84 as done in the Nature paper and later work.
-        :param env: (Gym Environment) the environment
-        """
-        gym.ObservationWrapper.__init__(self, env)
-        self.width = 84
-        self.height = 84
-        self.observation_space = spaces.Box(
-            low=0, high=255, shape=(self.height, self.width, 1), dtype=env.observation_space.dtype
-        )
-
-    def observation(self, frame):
-        """
-        returns the current observation from a frame
-        :param frame: ([int] or [float]) environment frame
-        :return: ([int] or [float]) the observation
-        """
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-        frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_AREA)
-        return frame[:, :, None]
-
-
-class FrameStackPyTorch(gym.Wrapper):
-    def __init__(self, env, n_frames):
-        """Stack n_frames last frames.
-        Returns lazy array, which is much more memory efficient.
-        See Also
-        --------
-        :param env: (Gym Environment) the environment
-        :param n_frames: (int) the number of frames to stack
-        """
-        super().__init__(env)
-        self.n_frames = n_frames
-        self.frames = deque([], maxlen=n_frames)
-        shp = env.observation_space.shape
-
-        self.observation_space = spaces.Box(
-            low=np.min(env.observation_space.low),
-            high=np.max(env.observation_space.high),
-            shape=(shp[0], shp[1], shp[2] * n_frames),
-            dtype=env.observation_space.dtype,
-        )
-
-    def reset(self):
-        obs = self.env.reset()
-        for _ in range(self.n_frames):
-            self.frames.append(obs)
-        return self._get_ob()
-
-    def step(self, action):
-        obs, reward, done, info = self.env.step(action)
-        self.frames.append(obs)
-        return self._get_ob(), reward, done, info
-
-    def _get_ob(self):
-        return np.concatenate(np.array(self.frames), axis=-1)
-
-
-class AtariWrapper(gym.Wrapper):
-    def __init__(self, env: gym.Env) -> None:
-        env = NoopResetWrapper(env, noop_max=30)
-        env = MaxAndSkipWrapper(env, frame_skip=4)
-        env = EpisodicLifeWrapper(env)
-        if "FIRE" in env.unwrapped.get_action_meanings():
-            env = FireResetWrapper(env)
-        env = WarpFramePyTorch(env)
-        env = ClipRewardWrapper(env)
-        env = FrameStackPyTorch(env, 4)
-        super().__init__(env)
 
 
 class LazyMultiStepMemory:
@@ -124,8 +49,8 @@ class LazyMultiStepMemory:
             observations[i, ...] = self.observation[_index]
             next_observations[i, ...] = self.next_observation[_index]
 
-        observations = torch.ByteTensor(observations).to(self.device).transpose(3, 1).float() / 255.0
-        next_observations = torch.ByteTensor(next_observations).to(self.device).transpose(3, 1).float() / 255.0
+        observations = torch.ByteTensor(observations).to(self.device).float() / 255.0
+        next_observations = torch.ByteTensor(next_observations).to(self.device).float() / 255.0
         actions = torch.LongTensor(self.action[indices]).to(self.device)
         rewards = torch.FloatTensor(self.reward[indices]).to(self.device)
         dones = torch.FloatTensor(self.done[indices]).to(self.device)
@@ -195,7 +120,6 @@ class QuantileNetwork(nn.Module):
         self.embedding_dim = embedding_dim
 
     def forward(self, observation_embeddings, tau_embeddings):
-
         # NOTE: Because variable taus correspond to either \tau or \hat \tau
         # in the paper, N isn't neccesarily the same as fqf.N.
         batch_size = observation_embeddings.shape[0]
@@ -208,7 +132,6 @@ class QuantileNetwork(nn.Module):
         embeddings = (observation_embeddings * tau_embeddings).view(batch_size * N, self.embedding_dim)
 
         # Calculate quantile values.
-
         quantiles = self.net(embeddings)
         return quantiles.view(batch_size, N, self.num_actions)
 
@@ -250,11 +173,18 @@ def evaluate_quantile_at_action(s_quantiles, actions):
 # Create environments.
 env_id = "PongNoFrameskip-v4"
 
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--action_repeat_probability", type=float)
+parser.add_argument("--num_stacked_frames", type=int)
+args = parser.parse_args()
+
+
 env = gym.make(env_id)
-env = AtariWrapper(env)
+env = AtariWrapper(env, action_repeat_probability=args.action_repeat_probability, num_stacked_frames=args.num_stacked_frames)
 
 # Create the agent and run.
-
 batch_size = 32
 N = 64
 N_dash = 64
@@ -268,15 +198,6 @@ epsilon_train = 0.01
 epsilon_eval = 0.001
 max_episode_steps = 27_000
 seed = 0
-
-# num_steps = 50_000  # 50_000_000
-# lr = 5e-4  # 5e-5
-# target_update_interval = 1_000  # 10_000
-# start_steps = 500  # 50_000
-# epsilon_decay_steps = 2_000  # 250_000
-# eval_interval = 2_000  # 250_000
-# num_eval_steps = 2_000  # 125_000
-
 num_steps = 10_000_000
 lr = 5e-5
 target_update_interval = 10_000
@@ -285,7 +206,21 @@ epsilon_decay_steps = 250_000
 eval_interval = 250_000
 num_eval_steps = 125_000
 
-wandb.init(project="IQN")
+
+num_steps = 50_000  # 50_000_000
+lr = 5e-4  # 5e-5
+target_update_interval = 1_000  # 10_000
+start_steps = 500  # 50_000
+epsilon_decay_steps = 2_000  # 250_000
+eval_interval = 2_000  # 250_000
+num_eval_steps = 2_000  # 125_000
+wandb.init(
+    project="IQN",
+    config=dict(
+        action_repeat_probability=args.action_repeat_probability,
+        num_stacked_frames=args.num_stacked_frames,
+    ),
+)
 
 torch.manual_seed(seed)
 np.random.seed(seed)
@@ -302,10 +237,10 @@ num_actions = env.action_space.n
 
 slope = (epsilon_train - 1.0) / epsilon_decay_steps
 
-# Online network.
-online_net = IQN(num_channels=env.observation_space.shape[2], num_actions=num_actions, K=K, num_cosines=num_cosines).to(device)
-# Target network.
-target_net = IQN(num_channels=env.observation_space.shape[2], num_actions=num_actions, K=K, num_cosines=num_cosines).to(device)
+# Online network
+online_net = IQN(num_channels=env.observation_space.shape[0], num_actions=num_actions, K=K, num_cosines=num_cosines).to(device)
+# Target network
+target_net = IQN(num_channels=env.observation_space.shape[0], num_actions=num_actions, K=K, num_cosines=num_cosines).to(device)
 
 # Copy parameters of the learning network to the target network.
 target_net.load_state_dict(online_net.state_dict())
@@ -325,7 +260,7 @@ while True:
         if global_step < start_steps or np.random.rand() < slope * min(global_step, epsilon_decay_steps) + 1.0:
             action = env.action_space.sample()
         else:
-            observation_ = torch.ByteTensor(np.array(observation)).unsqueeze(0).transpose(3, 1).to(device).float() / 255.0
+            observation_ = torch.ByteTensor(np.array(observation)).unsqueeze(0).to(device).float() / 255.0
             with torch.no_grad():
                 action = online_net.calculate_q(observations=observation_).argmax().item()
 
