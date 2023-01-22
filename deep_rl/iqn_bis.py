@@ -8,6 +8,7 @@ from gym import spaces
 from torch import nn, optim
 from utils import NoopResetWrapper, MaxAndSkipWrapper, EpisodicLifeWrapper, FireResetWrapper, ClipRewardWrapper
 import wandb
+
 cv2.ocl.setUseOpenCL(False)
 
 
@@ -253,26 +254,36 @@ env = gym.make(env_id)
 env = AtariWrapper(env)
 
 # Create the agent and run.
-num_steps = 50_000  # 50_000_000
+
 batch_size = 32
 N = 64
 N_dash = 64
 K = 32
 num_cosines = 64
 kappa = 1.0
-lr = 5e-4  # 5e-5
 memory_size = 1_000_000
 gamma = 0.99
 update_interval = 4
-target_update_interval = 1_000  # 10_000
-start_steps = 500  # 50_000
 epsilon_train = 0.01
 epsilon_eval = 0.001
-epsilon_decay_steps = 2_000  # 250_000
-eval_interval = 2_000  # 250_000
-num_eval_steps = 2_000  # 125_000
 max_episode_steps = 27_000
 seed = 0
+
+# num_steps = 50_000  # 50_000_000
+# lr = 5e-4  # 5e-5
+# target_update_interval = 1_000  # 10_000
+# start_steps = 500  # 50_000
+# epsilon_decay_steps = 2_000  # 250_000
+# eval_interval = 2_000  # 250_000
+# num_eval_steps = 2_000  # 125_000
+
+num_steps = 10_000_000
+lr = 5e-5
+target_update_interval = 10_000
+start_steps = 50_000
+epsilon_decay_steps = 250_000
+eval_interval = 250_000
+num_eval_steps = 125_000
 
 wandb.init(project="IQN")
 
