@@ -139,6 +139,8 @@ embedding_dim = 7 * 7 * 64
 kappa = 1.0
 memory_size = 1_000_000
 
+action_repeat_probability = 0.0
+
 wandb.init(
     project="IQN",
     config=dict(
@@ -160,11 +162,12 @@ wandb.init(
         embedding_dim=embedding_dim,
         kappa=kappa,
         memory_size=memory_size,
+        action_repeat_probability=action_repeat_probability,
     ),
 )
 
 # Env setup
-env = utils.AtariWrapper(gym.make(env_id))
+env = utils.AtariWrapper(gym.make(env_id), action_repeat_probability=action_repeat_probability)
 env = gym.wrappers.RecordEpisodeStatistics(env)
 env = TorchWrapper(env)
 
