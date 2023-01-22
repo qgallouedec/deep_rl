@@ -220,18 +220,6 @@ class MaxAndSkipWrapper(gym.Wrapper):
         return max_frame, total_reward, done, info
 
 
-class ClipRewardWrapper(gym.RewardWrapper):
-    """
-    Clips the reward to {+1, 0, -1} by its sign.
-
-    Args:
-        env (gym.Env): Environment to wrap
-    """
-
-    def reward(self, reward: float) -> float:
-        return np.sign(reward)
-
-
 class GrayscaleWrapper(gym.ObservationWrapper):
     """
     Convert observation to grayscale.
@@ -273,6 +261,69 @@ class ResizeWrapper(gym.ObservationWrapper):
         return observation
 
 
+class ChannelFirstWrapper(gym.ObservationWrapper):
+    """
+    Make observation chennel-first
+
+    Args:
+        env (gym.Env): Environment to wrap
+    """
+
+    def __init__(self, env: gym.Env) -> None:
+        super().__init__(env)
+        height, width, nb_channels = self.observation_space.shape
+        dtype = env.observation_space.dtype
+        self.observation_space = spaces.Box(low=0, high=255, shape=(nb_channels, height, width), dtype=dtype)
+
+    def observation(self, observation: np.ndarray) -> np.ndarray:
+        return np.transpose(observation, (2, 0, 1))
+
+
+class ClipRewardWrapper(gym.RewardWrapper):
+    """
+    Clips the reward to {+1, 0, -1} by its sign.
+
+    Args:
+        env (gym.Env): Environment to wrap
+    """
+
+    def reward(self, reward: float) -> float:
+        return np.sign(reward)
+
+
+class FrameStackWrapper(gym.Wrapper):
+    """
+    Stack ``n_frames`` last frames.
+
+    Args:
+        env (gym.Env): Environment to wrap
+        num_frames (int): Number of frames to stack
+    """
+
+    def __init__(self, env: gym.Env, num_frames: int) -> None:
+        super().__init__(env)
+        self.num_frames = num_frames
+        self.frames = deque(maxlen=num_frames)
+        self.observation_space = spaces.Box(
+            low=np.concatenate([env.observation_space.low for _ in range(num_frames)]),
+            high=np.concatenate([env.observation_space.high for _ in range(num_frames)]),
+            shape=(num_frames * env.observation_space.shape[0], *env.observation_space.shape[1:]),
+            dtype=env.observation_space.dtype,
+        )
+
+    def reset(self) -> np.ndarray:
+        obs = self.env.reset()
+        for _ in range(self.num_frames):
+            self.frames.append(obs)
+        return np.concatenate(np.array(self.frames), axis=0)
+
+    def step(self, action: int) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
+        observation, reward, done, info = self.env.step(action)
+        self.frames.append(observation)
+        observation = np.concatenate(np.array(self.frames), axis=0)
+        return observation, reward, done, info
+
+
 class AtariWrapper(gym.Wrapper):
     """
     Atari 2600 preprocessings.
@@ -280,46 +331,52 @@ class AtariWrapper(gym.Wrapper):
     Includes:
         - Sticky action
         - Noop reset
-        - Fire reset
         - Maxpool and frame skip
         - Episodic life
+        - Fire reset
         - Grayscale and resize
         - Clip reward
+        - Frames stacking
 
     Args:
         env (gym.Env): Environment to wrap
-        noop_max (int): Maximum value of no-ops to run. Defaults to 30.
         action_repeat_probability (float): Probability of repeating the previous action. Defaults to 0.25.
+        noop_max (int): Maximum value of no-ops to run. Defaults to 30.
         frame_skip (int): Number of frame to skip. Defaults to 4.
+        terminal_on_life_loss (bool): Whether to only reset when all lives are exausted. Defaults to True.
         width (int): Frame width. Defaults to 84.
         height (int): Frame height. Defaults to 84.
-        terminal_on_life_loss (bool): Whether to only reset when all lives are exausted. Defaults to True.
         clip_reward (bool): Whether to clip the reward. Defaults to True.
+        num_stacked_frames (int): Number of last frames to stack. Defaults to 1.
     """
 
     def __init__(
         self,
         env: gym.Env,
-        noop_max: int = 30,
         action_repeat_probability: int = 0.25,
+        noop_max: int = 30,
         frame_skip: int = 4,
+        terminal_on_life_loss: bool = True,
         width: int = 84,
         height: int = 84,
-        terminal_on_life_loss: bool = True,
         clip_reward: bool = True,
+        num_stacked_frames: int = 1,
     ) -> None:
         if action_repeat_probability > 0.0:
             env = StickyActionWrapper(env, action_repeat_probability)
         if noop_max > 0:
             env = NoopResetWrapper(env, noop_max=noop_max)
-        if "FIRE" in env.unwrapped.get_action_meanings():
-            env = FireResetWrapper(env)
         if frame_skip > 1:
             env = MaxAndSkipWrapper(env, frame_skip)
         if terminal_on_life_loss:
             env = EpisodicLifeWrapper(env)
+        if "FIRE" in env.unwrapped.get_action_meanings():
+            env = FireResetWrapper(env)
         env = GrayscaleWrapper(env)
         env = ResizeWrapper(env, width, height)
+        env = ChannelFirstWrapper(env)
         if clip_reward:
             env = ClipRewardWrapper(env)
+        if num_stacked_frames > 1:
+            env = FrameStackWrapper(env, num_frames=num_stacked_frames)
         super().__init__(env)
