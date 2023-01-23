@@ -41,10 +41,9 @@ env_id = "LunarLander-v2"
 total_timesteps = 100_000
 learning_starts = 10_000
 
-start_e = 1
-end_e = 0.05
-exploration_fraction = 0.5
-slope = (end_e - start_e) / (exploration_fraction * total_timesteps)
+final_epsilon = 0.05
+epsilon_decay_steps = 20_000
+slope = - (1.0 - final_epsilon) / epsilon_decay_steps
 
 alpha = 0.6
 beta_0 = 0.4
@@ -90,9 +89,9 @@ observations[global_step] = observation
 # Loop
 while global_step < total_timesteps:
     # Update exploration rate
-    epsilon = max(slope * global_step + start_e, end_e)
+    epsilon = max(1.0 + slope * global_step,  final_epsilon)
 
-    if np.random.random() < epsilon:
+    if global_step > learning_starts and np.random.random() < epsilon:
         action = torch.tensor(env.action_space.sample())
     else:
         q_values = q_network(observation)
