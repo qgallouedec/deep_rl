@@ -39,13 +39,12 @@ class QNetwork(nn.Module):
 
 env_id = "CartPole-v1"
 
-total_timesteps = 20_000
-learning_starts = 10_000
+total_timesteps = 50_000
+learning_starts = 5_000
 
-start_e = 1
-end_e = 0.05
-exploration_fraction = 0.5
-slope = (end_e - start_e) / (exploration_fraction * total_timesteps)
+final_epsilon = 0.05
+epsilon_decay_steps = 10_000
+slope = -(1.0 - final_epsilon) / epsilon_decay_steps
 
 train_frequency = 10
 batch_size = 128
@@ -90,9 +89,9 @@ observations[global_step] = observation
 # Loop
 while global_step < total_timesteps:
     # Update exploration rate
-    epsilon = max(slope * global_step + start_e, end_e)
+    epsilon = max(1.0 + slope * global_step, final_epsilon)
 
-    if np.random.random() < epsilon:
+    if global_step > learning_starts and np.random.random() < epsilon:
         action = torch.tensor(env.action_space.sample())
     else:
         probs = q_network.get_probs(observation)
