@@ -22,28 +22,22 @@ class TorchWrapper(gym.Wrapper):
         return torch.tensor(observation)
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
 class ActorCritic(nn.Module):
-    def __init__(self, env: gym.Env):
+    def __init__(self, env: gym.Env) -> None:
         super().__init__()
         self.actor = nn.Sequential(
-            layer_init(nn.Linear(np.array(env.observation_space.shape).prod(), 64)),
+            nn.Linear(np.array(env.observation_space.shape).prod(), 64),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            nn.Linear(64, 64),
             nn.Tanh(),
-            layer_init(nn.Linear(64, env.action_space.n), std=0.01),
+            nn.Linear(64, env.action_space.n),
         )
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(np.array(env.observation_space.shape).prod(), 64)),
+            nn.Linear(np.array(env.observation_space.shape).prod(), 64),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            nn.Linear(64, 64),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            nn.Linear(64, 1),
         )
 
     def get_value(self, observation: Tensor) -> Tensor:
