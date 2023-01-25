@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import utils
 from torch import Tensor, nn, optim
-import wandb
 
 
 class TorchWrapper(gym.Wrapper):
@@ -137,15 +136,6 @@ embedding_dim = 7 * 7 * 64
 kappa = 1.0
 memory_size = 1_000_000
 
-wandb.init(
-    project="IQN",
-    config=dict(
-        action_repeat_probability=0.25,
-        num_stacked_frames=4,
-        new_implementation=True,
-    ),
-)
-
 # Env setup
 env = utils.AtariWrapper(gym.make(env_id))
 env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -228,7 +218,6 @@ while global_step < total_timesteps:
 
     if "episode" in info.keys():
         print(f"global_step={global_step}, episodic_return={info['episode']['r']:.2f}")
-        wandb.log(dict(global_step=global_step, episodic_return=info["episode"]["r"]))
 
     # Optimize the agent
     if global_step >= learning_starts:
