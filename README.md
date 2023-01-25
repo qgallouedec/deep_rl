@@ -4,6 +4,9 @@
 
 Single-file truly minimal implementation of state-of-the-art reinforcement learning algorithms.
 
+> _Simplicity is the ultimate sophistication._
+> Leonardo da Vinci
+
 | Algorithm          |                    |
 | ------------------ | ------------------ |
 | A2C                | :x:                |
@@ -14,7 +17,7 @@ Single-file truly minimal implementation of state-of-the-art reinforcement learn
 | DQN                | :heavy_check_mark: |
 | Dueling DQN        | :heavy_check_mark: |
 | FQF                | :x:                |
-| IQN                | :x:                |
+| IQN                | :heavy_check_mark: |
 | RAINBOW            | :x:                |
 | Recurrent PPO      | :x:                |
 | REINFORCE          | :heavy_check_mark: |
@@ -28,13 +31,11 @@ Single-file truly minimal implementation of state-of-the-art reinforcement learn
 
 <sup>(1)</sup> with DQN
 
-
 ## Credit
 
 Most implementations are taken from [vwxyzjn/cleanrl](https://github.com/vwxyzjn/cleanrl) without being stricly equivalent.
+Other ressources: [toshikwa/fqf-iqn-qrdqn.pytorch](https://github.com/toshikwa/fqf-iqn-qrdqn.pytorch)
 
 ## Contributions
 
 are welcome.
-
-

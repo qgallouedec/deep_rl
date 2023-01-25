@@ -85,7 +85,7 @@ while global_step < total_timesteps:
     # Update exploration rate
     epsilon = max(slope * global_step + start_e, end_e)
 
-    if np.random.random() < epsilon:
+    if global_step < learning_starts or np.random.rand() < epsilon:
         action = torch.tensor(env.action_space.sample())
     else:
         q_values = q_network(observation)
