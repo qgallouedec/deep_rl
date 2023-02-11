@@ -16,6 +16,8 @@ class TorchWrapper:
 
     def __init__(self, env: EnvPool) -> None:
         self.env = env
+        self.observation_space = env.observation_space
+        self.action_space = env.action_space
 
     def step(self, action: Tensor) -> Tuple[Tensor, float, bool, Dict[str, Any]]:
         action = action.cpu().numpy()
