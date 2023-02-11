@@ -232,7 +232,7 @@ while global_step < total_timesteps:
 
     for env_idx in range(num_envs):
         if done[env_idx]:
-            elapsed_step = info["elapsed_step"]
+            elapsed_step = info["elapsed_step"][env_idx]
             episode_steps = np.arange(global_step - elapsed_step, elapsed_step) % memory_size
             cumulative_reward = np.sum(rewards[episode_steps, env_idx])
             print(f"global_step={global_step}, episodic_return={cumulative_reward:.2f}")
