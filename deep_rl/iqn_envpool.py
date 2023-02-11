@@ -5,7 +5,6 @@ from envpool.python.protocol import EnvPool
 import gym
 import numpy as np
 import torch
-import utils
 from torch import Tensor, nn, optim
 
 
@@ -141,7 +140,7 @@ num_quantile_samples = 32
 num_cosines = 64
 embedding_dim = 7 * 7 * 64
 kappa = 1.0
-memory_size = 1_000_000
+memory_size = 1_000_000 // num_envs
 
 seed = 0
 
