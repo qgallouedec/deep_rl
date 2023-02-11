@@ -7,6 +7,12 @@ import numpy as np
 import torch
 from torch import Tensor, nn, optim
 
+def _dict_to_tensor(value):
+    if isinstance(value, dict):
+        return {key: _dict_to_tensor(value) for key, value in value.items()}
+    elif isinstance(value, np.ndarray):
+        return torch.tensor(value)
+
 
 class TorchWrapper:
     """
@@ -25,7 +31,7 @@ class TorchWrapper:
             torch.tensor(observation),
             torch.tensor(reward),
             torch.tensor(done),
-            {key: torch.tensor(value) for key, value in info.items()},
+            _dict_to_tensor(info)
         )
 
     def reset(self) -> Tensor:
