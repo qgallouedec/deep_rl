@@ -18,10 +18,15 @@ class TorchWrapper:
         self.observation_space = env.observation_space
         self.action_space = env.action_space
 
-    def step(self, action: Tensor) -> Tuple[Tensor, float, bool, Dict[str, Any]]:
+    def step(self, action: Tensor) -> Tuple[Tensor, Tensor, Tensor, Dict[str, Tensor]]:
         action = action.cpu().numpy()
         observation, reward, done, info = self.env.step(action)
-        return torch.tensor(observation), reward, done, info
+        return (
+            torch.tensor(observation),
+            torch.tensor(reward),
+            torch.tensor(done),
+            {key: torch.tensor(value) for key, value in info.items()},
+        )
 
     def reset(self) -> Tensor:
         observation = self.env.reset()
