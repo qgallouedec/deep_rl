@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch import Tensor, nn, optim
 
+
 def _dict_to_tensor(value):
     if isinstance(value, dict):
         return {key: _dict_to_tensor(value) for key, value in value.items()}
@@ -27,12 +28,7 @@ class TorchWrapper:
     def step(self, action: Tensor) -> Tuple[Tensor, Tensor, Tensor, Dict[str, Tensor]]:
         action = action.cpu().numpy()
         observation, reward, done, info = self.env.step(action)
-        return (
-            torch.tensor(observation),
-            torch.tensor(reward),
-            torch.tensor(done),
-            _dict_to_tensor(info)
-        )
+        return (torch.tensor(observation), torch.tensor(reward), torch.tensor(done), _dict_to_tensor(info))
 
     def reset(self) -> Tensor:
         observation = self.env.reset()
@@ -132,18 +128,19 @@ class QuantileNetwork(nn.Module):
 env_id = "Pong-v5"
 
 total_timesteps = 10_000_000
-learning_starts = 50_000
 num_envs = 8
+learning_starts = 50_000 // num_envs
+
 
 final_epsilon = 0.01
-epsilon_decay_steps = 250_000
+epsilon_decay_steps = 250_000 // num_envs
 slope = -(1.0 - final_epsilon) / epsilon_decay_steps
 
 train_frequency = 4
 batch_size = 32
 gamma = 0.99
 learning_rate = 5e-5
-target_network_frequency = 10_000
+target_network_frequency = 10_000 // num_envs
 
 num_tau_samples = 64
 num_tau_prime_samples = 64
@@ -202,19 +199,20 @@ while global_step < total_timesteps:
     epsilon = max(1.0 + slope * global_step, final_epsilon)
 
     action = torch.zeros(num_envs, dtype=torch.long)
-    for env_idx in range(num_envs):
-        # Sample an action
-        if global_step < learning_starts or np.random.rand() < epsilon:
-            action[env_idx] = torch.tensor(env.action_space.sample())
-        else:
-            with torch.no_grad():
+    with torch.no_grad():
+        embeddings = online_features_extractor(observation.to(device))  # (num_envs, embedding_dim)
+        taus = torch.rand(num_envs, num_quantile_samples, device=device)  # (num_envs, num_quantile_samples)
+        tau_embeddings = online_cosine_net(taus)  # (num_envs, num_quantile_samples, embedding_dim)
+        quantiles = online_quantile_net(embeddings, tau_embeddings)  # (num_envs, num_quantile_samples, num_actions)
+        q_values = torch.mean(quantiles, dim=1)  # (num_envs, num_actions)
+        pred_action = torch.argmax(q_values, dim=1)  # (num_envs,)
+        for env_idx in range(num_envs):
+            # Sample an action
+            if global_step < learning_starts or np.random.rand() < epsilon:
+                action[env_idx] = torch.tensor(env.action_space.sample())
+            else:
                 # Compute the embedding, sample fractions and compute quantiles
-                embeddings = online_features_extractor(observation[env_idx].unsqueeze(0).to(device))  # (1, embedding_dim)
-                taus = torch.rand(num_envs, num_quantile_samples, device=device)  # (1, num_quantile_samples)
-                tau_embeddings = online_cosine_net(taus)  # (1, num_quantile_samples, embedding_dim)
-                quantiles = online_quantile_net(embeddings, tau_embeddings).squeeze()  # (num_quantile_samples, num_actions)
-            q_values = torch.mean(quantiles, dim=0)  # (num_actions,)
-            action[env_idx] = torch.argmax(q_values)
+                action[env_idx] = pred_action[env_idx]
 
     # Store
     actions[global_step % memory_size] = action
@@ -235,7 +233,7 @@ while global_step < total_timesteps:
             elapsed_step = info["elapsed_step"][env_idx]
             episode_steps = torch.arange(global_step - elapsed_step, global_step) % memory_size
             cumulative_reward = torch.sum(rewards[episode_steps, env_idx])
-            print(f"global_step={global_step}, episodic_return={cumulative_reward:.2f}")
+            print(f"global_step={global_step*num_envs}, episodic_return={cumulative_reward:.2f}")
 
     # Optimize the agent
     if global_step >= learning_starts:
