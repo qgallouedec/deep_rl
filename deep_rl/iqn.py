@@ -43,7 +43,7 @@ class FeaturesExtractor(nn.Module):
         ).apply(initialize_weights_he)
 
     def forward(self, input: Tensor) -> Tensor:
-        return self.net(input)
+        return self.net(input / 255.0)
 
 
 class CosineEmbeddingNetwork(nn.Module):
@@ -64,14 +64,13 @@ class CosineEmbeddingNetwork(nn.Module):
             nn.Linear(num_cosines, embedding_dim),
             nn.ReLU(),
         )
-        self.num_cosines = num_cosines
+        i_pi = np.pi * torch.arange(start=1, end=num_cosines + 1).reshape(1, 1, num_cosines)  # (1, 1, num_cosines)
+        self.register_buffer("i_pi", i_pi)
 
     def forward(self, taus: Tensor) -> Tensor:
         # Compute cos(i * pi * tau)
-        i_pi = np.pi * torch.arange(start=1, end=self.num_cosines + 1, device=taus.device)
-        i_pi = i_pi.reshape(1, 1, self.num_cosines)  # (1, 1, num_cosines)
         taus = torch.unsqueeze(taus, dim=-1)  # (batch_size, num_tau_samples, 1)
-        cosines = torch.cos(taus * i_pi)  # (batch_size, num_tau_samples, num_cosines)
+        cosines = torch.cos(taus * self.i_pi)  # (batch_size, num_tau_samples, num_cosines)
 
         # Compute embeddings of taus
         cosines = torch.flatten(cosines, end_dim=1)  # (batch_size * num_tau_samples, num_cosines)
@@ -151,6 +150,7 @@ env.observation_space.seed(seed)
 
 # Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("mps")
 
 # Network setup
 online_features_extractor = FeaturesExtractor(env).to(device)
@@ -189,11 +189,9 @@ while global_step < total_timesteps:
     if global_step < learning_starts or np.random.rand() < epsilon:
         action = torch.tensor(env.action_space.sample())
     else:
-        # Normalize image and make it channel-first
-        observation_ = observation.to(device).unsqueeze(0).float() / 255.0
         with torch.no_grad():
             # Compute the embedding, sample fractions and compute quantiles
-            embeddings = online_features_extractor(observation_)
+            embeddings = online_features_extractor(observation.to(device).unsqueeze(0))
             taus = torch.rand(1, num_quantile_samples, device=device)
             tau_embeddings = online_cosine_net(taus)
             quantiles = online_quantile_net(embeddings, tau_embeddings).squeeze()  # (num_quantile_samples, num_actions)
@@ -230,10 +228,6 @@ while global_step < total_timesteps:
             b_next_observations = observations[(batch_inds + 1) % memory_size].to(device)
             b_rewards = rewards[(batch_inds + 1) % memory_size].to(device)
             b_terminated = terminated[(batch_inds + 1) % memory_size].to(device)
-
-            # Normalize images and make them channel-first (batch_size, H, W, 1) to (batch_size, 1, H, W)
-            b_observations = b_observations.float() / 255.0
-            b_next_observations = b_next_observations.float() / 255.0
 
             # Sample fractions and compute quantile values of current observations and actions at taus
             embeddings = online_features_extractor(b_observations)
