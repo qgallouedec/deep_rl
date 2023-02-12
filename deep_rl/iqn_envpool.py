@@ -13,7 +13,7 @@ def _dict_to_tensor(value):
     if isinstance(value, dict):
         return {key: _dict_to_tensor(value) for key, value in value.items()}
     elif isinstance(value, np.ndarray):
-        return torch.tensor(value)
+        return torch.from_numpy(value)
 
 
 class TorchWrapper:
@@ -29,11 +29,11 @@ class TorchWrapper:
     def step(self, action: Tensor) -> Tuple[Tensor, Tensor, Tensor, Dict[str, Tensor]]:
         action = action.cpu().numpy()
         observation, reward, done, info = self.env.step(action)
-        return (torch.tensor(observation), torch.tensor(reward), torch.tensor(done), _dict_to_tensor(info))
+        return (torch.from_numpy(observation), torch.from_numpy(reward), torch.from_numpy(done), _dict_to_tensor(info))
 
     def reset(self) -> Tensor:
         observation = self.env.reset()
-        return torch.tensor(observation)
+        return torch.from_numpy(observation)
 
 
 def initialize_weights_he(m):
@@ -213,7 +213,7 @@ while global_step * num_envs < total_timesteps:
         for env_idx in range(num_envs):
             # Sample an action
             if global_step < learning_starts or np.random.rand() < epsilon:
-                action[env_idx] = torch.tensor(env.action_space.sample())
+                action[env_idx] = torch.from_numpy(env.action_space.sample())
             else:
                 # Compute the embedding, sample fractions and compute quantiles
                 action[env_idx] = pred_action[env_idx]
