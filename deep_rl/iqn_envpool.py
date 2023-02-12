@@ -222,7 +222,7 @@ if __name__ == "__main__":
     # rewards = torch.empty((memory_size, num_envs), dtype=torch.float32)
     # terminated = torch.empty((memory_size, num_envs), dtype=torch.bool)
     buffer = Buffer(memory_size, num_envs, env.observation_space.shape)
-    loader = DataLoader(buffer, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
+    loader = None
 
     # Initiate the envrionment and store the inital observation
     observation = env.reset()
@@ -274,6 +274,8 @@ if __name__ == "__main__":
 
         # Optimize the agent
         if global_step >= learning_starts:
+            if loader is None:
+                loader = DataLoader(buffer, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
             if global_step % train_frequency == 0:
                 for _ in range(grad_steps):
                     upper = min(global_step, memory_size)
