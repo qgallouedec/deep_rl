@@ -58,7 +58,7 @@ class Buffer(Dataset):
         return self.pos
 
     def __getitem__(self, idx):
-        batch_inds = idx / self.num_envs
+        batch_inds = idx // self.num_envs
         env_inds = idx % self.num_envs
         b_observations = self.observations[batch_inds, env_inds]
         b_actions = self.actions[batch_inds, env_inds]
