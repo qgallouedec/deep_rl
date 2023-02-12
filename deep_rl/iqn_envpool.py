@@ -140,8 +140,8 @@ final_epsilon = 0.01
 epsilon_decay_steps = 250_000 // num_envs
 slope = -(1.0 - final_epsilon) / epsilon_decay_steps
 
-train_frequency = 1
-grad_steps = num_envs // 4
+train_frequency = 4
+grad_steps = 1 #num_envs // 4
 batch_size = 32
 gamma = 0.99
 learning_rate = 5e-5
