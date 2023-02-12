@@ -231,14 +231,14 @@ while global_step < total_timesteps:
     for env_idx in range(num_envs):
         if done[env_idx]:
             elapsed_step = info["elapsed_step"][env_idx]
-            episode_steps = torch.arange(global_step - elapsed_step, global_step) % memory_size
+            episode_steps = torch.arange(global_step - elapsed_step + 1, global_step) % memory_size
             cumulative_reward = torch.sum(rewards[episode_steps, env_idx])
             print(f"global_step={global_step*num_envs}, episodic_return={cumulative_reward:.2f}")
 
     # Optimize the agent
     if global_step >= learning_starts:
         # if global_step % train_frequency == 0:
-        for _ in range(2): # eqivalent to train_frequency // 8
+        for _ in range(2):  # eqivalent to train_frequency // 8
             upper = min(global_step, memory_size)
             batch_inds = np.random.randint(upper, size=batch_size)
             env_inds = np.random.randint(num_envs, size=batch_size)
