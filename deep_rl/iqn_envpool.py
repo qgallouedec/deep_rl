@@ -198,7 +198,7 @@ observations[global_step % memory_size] = observation
 start_time = time.time()
 
 # Loop
-while global_step < total_timesteps:
+while global_step * num_envs < total_timesteps:
     # Update exploration rate
     epsilon = max(1.0 + slope * global_step, final_epsilon)
 
