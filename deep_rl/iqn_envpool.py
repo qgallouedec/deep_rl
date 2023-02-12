@@ -132,7 +132,7 @@ class QuantileNetwork(nn.Module):
 env_id = "Pong-v5"
 
 total_timesteps = 85_000  # 10_000_000
-num_envs = 16
+num_envs = 4
 learning_starts = 50_000 // num_envs
 
 
