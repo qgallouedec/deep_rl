@@ -204,7 +204,7 @@ while global_step * num_envs < total_timesteps:
 
     action = torch.zeros(num_envs, dtype=torch.long)
     with torch.no_grad():
-        embeddings = online_features_extractor(observation.to(device))  # (num_envs, embedding_dim)
+        embeddings = online_features_extractor(observation.to(device, non_blocking=True))  # (num_envs, embedding_dim)
         taus = torch.rand(num_envs, num_quantile_samples, device=device)  # (num_envs, num_quantile_samples)
         tau_embeddings = online_cosine_net(taus)  # (num_envs, num_quantile_samples, embedding_dim)
         quantiles = online_quantile_net(embeddings, tau_embeddings)  # (num_envs, num_quantile_samples, num_actions)
@@ -249,11 +249,11 @@ while global_step * num_envs < total_timesteps:
                 batch_inds = np.random.randint(upper, size=batch_size)
                 env_inds = np.random.randint(num_envs, size=batch_size)
 
-                b_observations = observations[batch_inds, env_inds].to(device)
-                b_actions = actions[batch_inds, env_inds].to(device)
-                b_next_observations = observations[(batch_inds + 1) % memory_size, env_inds].to(device)
-                b_rewards = rewards[(batch_inds + 1) % memory_size, env_inds].to(device)
-                b_terminated = terminated[(batch_inds + 1) % memory_size, env_inds].to(device)
+                b_observations = observations[batch_inds, env_inds].to(device, non_blocking=True)
+                b_actions = actions[batch_inds, env_inds].to(device, non_blocking=True)
+                b_next_observations = observations[(batch_inds + 1) % memory_size, env_inds].to(device, non_blocking=True)
+                b_rewards = rewards[(batch_inds + 1) % memory_size, env_inds].to(device, non_blocking=True)
+                b_terminated = terminated[(batch_inds + 1) % memory_size, env_inds].to(device, non_blocking=True)
 
                 # Sample fractions and compute quantile values of current observations and actions at taus
                 embeddings = online_features_extractor(b_observations)
