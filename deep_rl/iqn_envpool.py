@@ -136,7 +136,7 @@ final_epsilon = 0.01
 epsilon_decay_steps = 250_000 // num_envs
 slope = -(1.0 - final_epsilon) / epsilon_decay_steps
 
-train_frequency = 4
+# train_frequency = 4
 batch_size = 32
 gamma = 0.99
 learning_rate = 5e-5
@@ -237,7 +237,8 @@ while global_step < total_timesteps:
 
     # Optimize the agent
     if global_step >= learning_starts:
-        if global_step % train_frequency == 0:
+        # if global_step % train_frequency == 0:
+        for _ in range(2): # eqivalent to train_frequency // 8
             upper = min(global_step, memory_size)
             batch_inds = np.random.randint(upper, size=batch_size)
             env_inds = np.random.randint(num_envs, size=batch_size)
