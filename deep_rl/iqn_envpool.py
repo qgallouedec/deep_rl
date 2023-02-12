@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict, Tuple
+from typing import Dict, Tuple
 
 import envpool
 import gym
@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from envpool.python.protocol import EnvPool
 from torch import Tensor, nn, optim
-import torch.autograd.profiler as profiler
+
 
 def _dict_to_tensor(value):
     if isinstance(value, dict):
@@ -34,6 +34,9 @@ class TorchWrapper:
     def reset(self) -> Tensor:
         observation = self.env.reset()
         return torch.from_numpy(observation)
+
+    def close(self):
+        self.env.close()
 
 
 def initialize_weights_he(m):
@@ -128,7 +131,7 @@ class QuantileNetwork(nn.Module):
 
 env_id = "Pong-v5"
 
-total_timesteps = 85_000 # 10_000_000
+total_timesteps = 85_000  # 10_000_000
 num_envs = 32
 learning_starts = 50_000 // num_envs
 
@@ -198,73 +201,73 @@ observations[global_step % memory_size] = observation
 start_time = time.time()
 
 # Loop
-with profiler.profile(with_stack=True, profile_memory=True) as prof:
-    while global_step * num_envs < total_timesteps:
-        # Update exploration rate
-        epsilon = max(1.0 + slope * global_step, final_epsilon)
+while global_step * num_envs < total_timesteps:
+    # Update exploration rate
+    epsilon = max(1.0 + slope * global_step, final_epsilon)
 
-        action = torch.tensor([env.action_space.sample() for _ in range(num_envs)], device=device)
-        if global_step > learning_starts:
-            with torch.no_grad():
-                embeddings = online_features_extractor(observation.to(device, non_blocking=True))  # (num_envs, embedding_dim)
-                taus = torch.rand(num_envs, num_quantile_samples, device=device)  # (num_envs, num_quantile_samples)
-                tau_embeddings = online_cosine_net(taus)  # (num_envs, num_quantile_samples, embedding_dim)
-                quantiles = online_quantile_net(embeddings, tau_embeddings)  # (num_envs, num_quantile_samples, num_actions)
-                q_values = torch.mean(quantiles, dim=1)  # (num_envs, num_actions)
-                pred_action = torch.argmax(q_values, dim=1)  # (num_envs,)
-                random_action_idxs = torch.rand(num_envs, device=device) < epsilon
-                action = torch.where(random_action_idxs, action, pred_action)
+    action = torch.tensor([env.action_space.sample() for _ in range(num_envs)], device=device)
+    if global_step > learning_starts:
+        with torch.no_grad():
+            embeddings = online_features_extractor(observation.to(device, non_blocking=True))  # (num_envs, embedding_dim)
+            taus = torch.rand(num_envs, num_quantile_samples, device=device)  # (num_envs, num_quantile_samples)
+            tau_embeddings = online_cosine_net(taus)  # (num_envs, num_quantile_samples, embedding_dim)
+            quantiles = online_quantile_net(embeddings, tau_embeddings)  # (num_envs, num_quantile_samples, num_actions)
+            q_values = torch.mean(quantiles, dim=1)  # (num_envs, num_actions)
+            pred_action = torch.argmax(q_values, dim=1)  # (num_envs,)
+            random_action_idxs = torch.rand(num_envs, device=device) < epsilon
+            action = torch.where(random_action_idxs, action, pred_action)
 
-        # Store
-        actions[global_step % memory_size] = action
+    # Store
+    actions[global_step % memory_size] = action
 
-        # Step
-        observation, reward, done, info = env.step(action)
+    # Step
+    observation, reward, done, info = env.step(action)
 
-        # Update count
-        global_step += 1
+    # Update count
+    global_step += 1
 
-        # Store
-        observations[global_step % memory_size] = observation
-        rewards[global_step % memory_size] = reward
-        terminated[global_step % memory_size] = np.logical_and(done, np.logical_not(info.get("TimeLimit.truncated")))
+    # Store
+    observations[global_step % memory_size] = observation
+    rewards[global_step % memory_size] = reward
+    terminated[global_step % memory_size] = np.logical_and(done, np.logical_not(info.get("TimeLimit.truncated")))
 
-        for env_idx in range(num_envs):
-            if done[env_idx]:
-                elapsed_step = info["elapsed_step"][env_idx]
-                episode_steps = torch.arange(global_step - elapsed_step + 1, global_step) % memory_size
-                cumulative_reward = torch.sum(rewards[episode_steps, env_idx])
-                print(
-                    f"global_step={global_step*num_envs}, episodic_return={cumulative_reward:.2f}, fps={global_step * num_envs / (time.time() - start_time):.2f}"
-                )
+    for env_idx in range(num_envs):
+        if done[env_idx]:
+            elapsed_step = info["elapsed_step"][env_idx]
+            episode_steps = torch.arange(global_step - elapsed_step + 1, global_step) % memory_size
+            cumulative_reward = torch.sum(rewards[episode_steps, env_idx])
+            print(
+                f"global_step={global_step*num_envs}, episodic_return={cumulative_reward:.2f}, fps={global_step * num_envs / (time.time() - start_time):.2f}"
+            )
 
-        # Optimize the agent
-        if global_step >= learning_starts:
-            if global_step % train_frequency == 0:
-                for _ in range(grad_steps):
-                    upper = min(global_step, memory_size)
-                    batch_inds = np.random.randint(upper, size=batch_size)
-                    env_inds = np.random.randint(num_envs, size=batch_size)
+    # Optimize the agent
+    if global_step >= learning_starts:
+        if global_step % train_frequency == 0:
+            for _ in range(grad_steps):
+                upper = min(global_step, memory_size)
+                batch_inds = np.random.randint(upper, size=batch_size)
+                env_inds = np.random.randint(num_envs, size=batch_size)
 
-                    b_observations = observations[batch_inds, env_inds].to(device, non_blocking=True)
-                    b_actions = actions[batch_inds, env_inds].to(device, non_blocking=True)
-                    b_next_observations = observations[(batch_inds + 1) % memory_size, env_inds].to(device, non_blocking=True)
-                    b_rewards = rewards[(batch_inds + 1) % memory_size, env_inds].to(device, non_blocking=True)
-                    b_terminated = terminated[(batch_inds + 1) % memory_size, env_inds].to(device, non_blocking=True)
+                b_observations = observations[batch_inds, env_inds].to(device, non_blocking=True)
+                b_actions = actions[batch_inds, env_inds].to(device, non_blocking=True)
+                b_next_observations = observations[(batch_inds + 1) % memory_size, env_inds].to(device, non_blocking=True)
+                b_rewards = rewards[(batch_inds + 1) % memory_size, env_inds].to(device, non_blocking=True)
+                b_terminated = terminated[(batch_inds + 1) % memory_size, env_inds].to(device, non_blocking=True)
 
-                    # Sample fractions and compute quantile values of current observations and actions at taus
-                    embeddings = online_features_extractor(b_observations)
-                    taus = torch.rand(batch_size, num_tau_samples, device=device)
-                    tau_embeddings = online_cosine_net(taus)
-                    quantiles = online_quantile_net(embeddings, tau_embeddings)
+                # Sample fractions and compute quantile values of current observations and actions at taus
+                embeddings = online_features_extractor(b_observations)
+                taus = torch.rand(batch_size, num_tau_samples, device=device)
+                tau_embeddings = online_cosine_net(taus)
+                quantiles = online_quantile_net(embeddings, tau_embeddings)
 
-                    # Compute quantile values at specified actions. The notation seems eavy notation,
-                    # but just select value of s_quantile (batch_size, num_tau_samples, num_quantiles) with
-                    # action_indexes (batch_size, num_quantile_samples).
-                    # Output shape is thus (batch_size, num_quantile_samples)
-                    action_index = b_actions[..., None].expand(-1, num_tau_samples)  # Expand to (batch_size, num_tau_samples)
-                    current_action_quantiles = quantiles.gather(dim=2, index=action_index.unsqueeze(-1)).squeeze(-1)
+                # Compute quantile values at specified actions. The notation seems eavy notation,
+                # but just select value of s_quantile (batch_size, num_tau_samples, num_quantiles) with
+                # action_indexes (batch_size, num_quantile_samples).
+                # Output shape is thus (batch_size, num_quantile_samples)
+                action_index = b_actions[..., None].expand(-1, num_tau_samples)  # Expand to (batch_size, num_tau_samples)
+                current_action_quantiles = quantiles.gather(dim=2, index=action_index.unsqueeze(-1)).squeeze(-1)
 
+                with torch.no_grad():
                     # Compute Q values of next observations
                     next_embeddings = target_features_extractor(b_next_observations)
                     next_taus = torch.rand(batch_size, num_quantile_samples, device=device)
@@ -294,26 +297,25 @@ with profiler.profile(with_stack=True, profile_memory=True) as prof:
                         b_rewards[..., None] + torch.logical_not(b_terminated)[..., None] * gamma * next_action_quantiles
                     )
 
-                    # TD-error is the cross differnce between the target quantiles and the currents quantiles
-                    td_errors = target_action_quantiles.unsqueeze(-2).detach() - current_action_quantiles.unsqueeze(-1)
+                # TD-error is the cross differnce between the target quantiles and the currents quantiles
+                td_errors = target_action_quantiles.unsqueeze(-2) - current_action_quantiles.unsqueeze(-1)
 
-                    # Compute quantile Huber loss
-                    huber_loss = torch.where(
-                        torch.abs(td_errors) <= kappa, td_errors**2, kappa * (torch.abs(td_errors) - 0.5 * kappa)
-                    )
-                    quantile_huber_loss = torch.abs(taus[..., None] - (td_errors.detach() < 0).float()) * huber_loss / kappa
-                    batch_quantile_huber_loss = torch.sum(quantile_huber_loss, dim=1)
-                    quantile_loss = torch.mean(batch_quantile_huber_loss)
+                # Compute quantile Huber loss
+                huber_loss = torch.where(
+                    torch.abs(td_errors) <= kappa, 0.5 * td_errors**2, kappa * (torch.abs(td_errors) - 0.5 * kappa)
+                )
+                quantile_huber_loss = torch.abs(taus[..., None] - (td_errors.detach() < 0).float()) * huber_loss / kappa
+                batch_quantile_huber_loss = torch.sum(quantile_huber_loss, dim=1)
+                quantile_loss = torch.mean(batch_quantile_huber_loss)
 
-                    optimizer.zero_grad()
-                    quantile_loss.backward()
-                    optimizer.step()
+                optimizer.zero_grad()
+                quantile_loss.backward()
+                optimizer.step()
 
-            # Update the target network
-            if global_step % target_network_frequency == 0:
-                target_features_extractor.load_state_dict(online_features_extractor.state_dict())
-                target_cosine_net.load_state_dict(online_cosine_net.state_dict())
-                target_quantile_net.load_state_dict(online_quantile_net.state_dict())
-    
-print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
+        # Update the target network
+        if global_step % target_network_frequency == 0:
+            target_features_extractor.load_state_dict(online_features_extractor.state_dict())
+            target_cosine_net.load_state_dict(online_cosine_net.state_dict())
+            target_quantile_net.load_state_dict(online_quantile_net.state_dict())
+
 env.close()
