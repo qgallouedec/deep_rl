@@ -202,21 +202,17 @@ while global_step * num_envs < total_timesteps:
     # Update exploration rate
     epsilon = max(1.0 + slope * global_step, final_epsilon)
 
-    action = torch.zeros(num_envs, dtype=torch.long)
-    with torch.no_grad():
-        embeddings = online_features_extractor(observation.to(device, non_blocking=True))  # (num_envs, embedding_dim)
-        taus = torch.rand(num_envs, num_quantile_samples, device=device)  # (num_envs, num_quantile_samples)
-        tau_embeddings = online_cosine_net(taus)  # (num_envs, num_quantile_samples, embedding_dim)
-        quantiles = online_quantile_net(embeddings, tau_embeddings)  # (num_envs, num_quantile_samples, num_actions)
-        q_values = torch.mean(quantiles, dim=1)  # (num_envs, num_actions)
-        pred_action = torch.argmax(q_values, dim=1)  # (num_envs,)
-        for env_idx in range(num_envs):
-            # Sample an action
-            if global_step < learning_starts or np.random.rand() < epsilon:
-                action[env_idx] = torch.from_numpy(env.action_space.sample())
-            else:
-                # Compute the embedding, sample fractions and compute quantiles
-                action[env_idx] = pred_action[env_idx]
+    action = torch.from_numpy([env.action_space.sample() for _ in range(num_envs)])
+    if global_step > learning_starts:
+        with torch.no_grad():
+            embeddings = online_features_extractor(observation.to(device, non_blocking=True))  # (num_envs, embedding_dim)
+            taus = torch.rand(num_envs, num_quantile_samples, device=device)  # (num_envs, num_quantile_samples)
+            tau_embeddings = online_cosine_net(taus)  # (num_envs, num_quantile_samples, embedding_dim)
+            quantiles = online_quantile_net(embeddings, tau_embeddings)  # (num_envs, num_quantile_samples, num_actions)
+            q_values = torch.mean(quantiles, dim=1)  # (num_envs, num_actions)
+            pred_action = torch.argmax(q_values, dim=1)  # (num_envs,)
+            pred_idx = torch.randn(num_envs, device=device) > epsilon
+            action = torch.where(pred_idx, pred_action, action)
 
     # Store
     actions[global_step % memory_size] = action
