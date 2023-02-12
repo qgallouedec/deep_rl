@@ -129,7 +129,7 @@ class QuantileNetwork(nn.Module):
 env_id = "Pong-v5"
 
 total_timesteps = 10_000_000
-num_envs = 8
+num_envs = 32
 learning_starts = 50_000 // num_envs
 
 
@@ -137,7 +137,8 @@ final_epsilon = 0.01
 epsilon_decay_steps = 250_000 // num_envs
 slope = -(1.0 - final_epsilon) / epsilon_decay_steps
 
-# train_frequency = 4
+train_frequency = 1
+grad_steps = num_envs // 4
 batch_size = 32
 gamma = 0.99
 learning_rate = 5e-5
@@ -242,74 +243,74 @@ while global_step < total_timesteps:
 
     # Optimize the agent
     if global_step >= learning_starts:
-        # if global_step % train_frequency == 0:
-        for _ in range(2):  # eqivalent to train_frequency // 8
-            upper = min(global_step, memory_size)
-            batch_inds = np.random.randint(upper, size=batch_size)
-            env_inds = np.random.randint(num_envs, size=batch_size)
+        if global_step % train_frequency == 0:
+            for _ in range(grad_steps):
+                upper = min(global_step, memory_size)
+                batch_inds = np.random.randint(upper, size=batch_size)
+                env_inds = np.random.randint(num_envs, size=batch_size)
 
-            b_observations = observations[batch_inds, env_inds].to(device)
-            b_actions = actions[batch_inds, env_inds].to(device)
-            b_next_observations = observations[(batch_inds + 1) % memory_size, env_inds].to(device)
-            b_rewards = rewards[(batch_inds + 1) % memory_size, env_inds].to(device)
-            b_terminated = terminated[(batch_inds + 1) % memory_size, env_inds].to(device)
+                b_observations = observations[batch_inds, env_inds].to(device)
+                b_actions = actions[batch_inds, env_inds].to(device)
+                b_next_observations = observations[(batch_inds + 1) % memory_size, env_inds].to(device)
+                b_rewards = rewards[(batch_inds + 1) % memory_size, env_inds].to(device)
+                b_terminated = terminated[(batch_inds + 1) % memory_size, env_inds].to(device)
 
-            # Sample fractions and compute quantile values of current observations and actions at taus
-            embeddings = online_features_extractor(b_observations)
-            taus = torch.rand(batch_size, num_tau_samples, device=device)
-            tau_embeddings = online_cosine_net(taus)
-            quantiles = online_quantile_net(embeddings, tau_embeddings)
+                # Sample fractions and compute quantile values of current observations and actions at taus
+                embeddings = online_features_extractor(b_observations)
+                taus = torch.rand(batch_size, num_tau_samples, device=device)
+                tau_embeddings = online_cosine_net(taus)
+                quantiles = online_quantile_net(embeddings, tau_embeddings)
 
-            # Compute quantile values at specified actions. The notation seems eavy notation,
-            # but just select value of s_quantile (batch_size, num_tau_samples, num_quantiles) with
-            # action_indexes (batch_size, num_quantile_samples).
-            # Output shape is thus (batch_size, num_quantile_samples)
-            action_index = b_actions[..., None].expand(-1, num_tau_samples)  # Expand to (batch_size, num_tau_samples)
-            current_action_quantiles = quantiles.gather(dim=2, index=action_index.unsqueeze(-1)).squeeze(-1)
+                # Compute quantile values at specified actions. The notation seems eavy notation,
+                # but just select value of s_quantile (batch_size, num_tau_samples, num_quantiles) with
+                # action_indexes (batch_size, num_quantile_samples).
+                # Output shape is thus (batch_size, num_quantile_samples)
+                action_index = b_actions[..., None].expand(-1, num_tau_samples)  # Expand to (batch_size, num_tau_samples)
+                current_action_quantiles = quantiles.gather(dim=2, index=action_index.unsqueeze(-1)).squeeze(-1)
 
-            # Compute Q values of next observations
-            next_embeddings = target_features_extractor(b_next_observations)
-            next_taus = torch.rand(batch_size, num_quantile_samples, device=device)
-            next_tau_embeddings = target_cosine_net(next_taus)
-            next_quantiles = target_quantile_net(
-                next_embeddings, next_tau_embeddings
-            )  # (batch_size, num_quantile_samples, num_actions)
+                # Compute Q values of next observations
+                next_embeddings = target_features_extractor(b_next_observations)
+                next_taus = torch.rand(batch_size, num_quantile_samples, device=device)
+                next_tau_embeddings = target_cosine_net(next_taus)
+                next_quantiles = target_quantile_net(
+                    next_embeddings, next_tau_embeddings
+                )  # (batch_size, num_quantile_samples, num_actions)
 
-            # Compute greedy actions
-            next_q_values = torch.mean(next_quantiles, dim=1)  # (batch_size, num_actions)
-            next_actions = torch.argmax(next_q_values, dim=1)  # (batch_size,)
+                # Compute greedy actions
+                next_q_values = torch.mean(next_quantiles, dim=1)  # (batch_size, num_actions)
+                next_actions = torch.argmax(next_q_values, dim=1)  # (batch_size,)
 
-            # Compute next quantiles
-            tau_dashes = torch.rand(batch_size, num_tau_prime_samples, device=device)
-            tau_dashes_embeddings = target_cosine_net(tau_dashes)
-            next_quantiles = target_quantile_net(next_embeddings, tau_dashes_embeddings)
+                # Compute next quantiles
+                tau_dashes = torch.rand(batch_size, num_tau_prime_samples, device=device)
+                tau_dashes_embeddings = target_cosine_net(tau_dashes)
+                next_quantiles = target_quantile_net(next_embeddings, tau_dashes_embeddings)
 
-            # Compute quantile values at specified actions. The notation seems eavy notation,
-            # but just select value of s_quantile (batch_size, num_tau_samples, num_quantiles)
-            # with action_indexes (batch_size, num_quantile_samples).
-            # Output shape is thus (batch_size, num_quantile_samples).
-            next_action_index = next_actions[..., None].expand(-1, num_tau_prime_samples)
-            next_action_quantiles = next_quantiles.gather(dim=2, index=next_action_index.unsqueeze(-1)).squeeze(-1)
+                # Compute quantile values at specified actions. The notation seems eavy notation,
+                # but just select value of s_quantile (batch_size, num_tau_samples, num_quantiles)
+                # with action_indexes (batch_size, num_quantile_samples).
+                # Output shape is thus (batch_size, num_quantile_samples).
+                next_action_index = next_actions[..., None].expand(-1, num_tau_prime_samples)
+                next_action_quantiles = next_quantiles.gather(dim=2, index=next_action_index.unsqueeze(-1)).squeeze(-1)
 
-            # Compute target quantile values (batch_size, num_tau_prime_samples)
-            target_action_quantiles = (
-                b_rewards[..., None] + torch.logical_not(b_terminated)[..., None] * gamma * next_action_quantiles
-            )
+                # Compute target quantile values (batch_size, num_tau_prime_samples)
+                target_action_quantiles = (
+                    b_rewards[..., None] + torch.logical_not(b_terminated)[..., None] * gamma * next_action_quantiles
+                )
 
-            # TD-error is the cross differnce between the target quantiles and the currents quantiles
-            td_errors = target_action_quantiles.unsqueeze(-2).detach() - current_action_quantiles.unsqueeze(-1)
+                # TD-error is the cross differnce between the target quantiles and the currents quantiles
+                td_errors = target_action_quantiles.unsqueeze(-2).detach() - current_action_quantiles.unsqueeze(-1)
 
-            # Compute quantile Huber loss
-            huber_loss = torch.where(
-                torch.abs(td_errors) <= kappa, td_errors**2, kappa * (torch.abs(td_errors) - 0.5 * kappa)
-            )
-            quantile_huber_loss = torch.abs(taus[..., None] - (td_errors.detach() < 0).float()) * huber_loss / kappa
-            batch_quantile_huber_loss = torch.sum(quantile_huber_loss, dim=1)
-            quantile_loss = torch.mean(batch_quantile_huber_loss)
+                # Compute quantile Huber loss
+                huber_loss = torch.where(
+                    torch.abs(td_errors) <= kappa, td_errors**2, kappa * (torch.abs(td_errors) - 0.5 * kappa)
+                )
+                quantile_huber_loss = torch.abs(taus[..., None] - (td_errors.detach() < 0).float()) * huber_loss / kappa
+                batch_quantile_huber_loss = torch.sum(quantile_huber_loss, dim=1)
+                quantile_loss = torch.mean(batch_quantile_huber_loss)
 
-            optimizer.zero_grad()
-            quantile_loss.backward()
-            optimizer.step()
+                optimizer.zero_grad()
+                quantile_loss.backward()
+                optimizer.step()
 
         # Update the target network
         if global_step % target_network_frequency == 0:
