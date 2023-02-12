@@ -314,5 +314,6 @@ with profiler.profile(with_stack=True, profile_memory=True) as prof:
                 target_features_extractor.load_state_dict(online_features_extractor.state_dict())
                 target_cosine_net.load_state_dict(online_cosine_net.state_dict())
                 target_quantile_net.load_state_dict(online_quantile_net.state_dict())
-
-    env.close()
+    
+print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
+env.close()
