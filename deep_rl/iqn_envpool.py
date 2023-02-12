@@ -202,7 +202,7 @@ while global_step * num_envs < total_timesteps:
     # Update exploration rate
     epsilon = max(1.0 + slope * global_step, final_epsilon)
 
-    action = torch.from_numpy([env.action_space.sample() for _ in range(num_envs)])
+    random_action = torch.tensor([env.action_space.sample() for _ in range(num_envs)], device=device)
     if global_step > learning_starts:
         with torch.no_grad():
             embeddings = online_features_extractor(observation.to(device, non_blocking=True))  # (num_envs, embedding_dim)
@@ -211,8 +211,8 @@ while global_step * num_envs < total_timesteps:
             quantiles = online_quantile_net(embeddings, tau_embeddings)  # (num_envs, num_quantile_samples, num_actions)
             q_values = torch.mean(quantiles, dim=1)  # (num_envs, num_actions)
             pred_action = torch.argmax(q_values, dim=1)  # (num_envs,)
-            pred_idx = torch.randn(num_envs, device=device) > epsilon
-            action = torch.where(pred_idx, pred_action, action)
+            random_action_idxs = torch.rand(num_envs, device=device) < epsilon
+            action = torch.where(random_action_idxs, random_action, pred_action)
 
     # Store
     actions[global_step % memory_size] = action
