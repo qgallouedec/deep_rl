@@ -1092,7 +1092,7 @@ if __name__== '__main__':
 
     """Environment Settings"""
     # number of environments for C51
-    N_ENVS = 1
+    N_ENVS = 16
     # Total simulation step
     STEP_NUM = int(1e8)
     # gamma for MDP
