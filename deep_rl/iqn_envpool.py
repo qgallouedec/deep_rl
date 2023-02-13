@@ -81,7 +81,7 @@ class CosineEmbeddingNetwork(nn.Module):
             nn.Linear(num_cosines, embedding_dim),
             nn.ReLU(),
         )
-        i_pi = np.pi * torch.arange(start=1, end=num_cosines + 1).reshape(1, 1, num_cosines)  # (1, 1, num_cosines)
+        i_pi = torch.pi * torch.arange(start=1, end=num_cosines + 1).reshape(1, 1, num_cosines)  # (1, 1, num_cosines)
         self.register_buffer("i_pi", i_pi)
 
     def forward(self, taus: Tensor) -> Tensor:
@@ -159,7 +159,6 @@ seed = 0
 
 # Env setup
 env = envpool.make(env_id, env_type="gym", num_envs=num_envs, episodic_life=True, reward_clip=True, seed=seed)
-# env = gym.wrappers.RecordEpisodeStatistics(env)
 env = TorchWrapper(env)
 
 # Seeding
@@ -188,10 +187,10 @@ parameters = [*online_features_extractor.parameters(), *online_cosine_net.parame
 optimizer = optim.Adam(parameters, lr=learning_rate, eps=1e-2 / batch_size)
 
 # Storage setup
-observations = torch.empty((memory_size, num_envs, *env.observation_space.shape), dtype=torch.uint8)
-actions = torch.empty((memory_size, num_envs), dtype=torch.long)
-rewards = torch.empty((memory_size, num_envs), dtype=torch.float32)
-terminated = torch.empty((memory_size, num_envs), dtype=torch.bool)
+observations = torch.zeros((memory_size, num_envs, *env.observation_space.shape), dtype=torch.uint8)
+actions = torch.zeros((memory_size, num_envs), dtype=torch.long)
+rewards = torch.zeros((memory_size, num_envs), dtype=torch.float32)
+terminated = torch.zeros((memory_size, num_envs), dtype=torch.bool)
 
 # Initiate the envrionment and store the inital observation
 observation = env.reset()
@@ -229,7 +228,7 @@ while global_step * num_envs < total_timesteps:
     # Store
     observations[global_step % memory_size] = observation
     rewards[global_step % memory_size] = reward
-    terminated[global_step % memory_size] = np.logical_and(done, np.logical_not(info.get("TimeLimit.truncated")))
+    terminated[global_step % memory_size] = torch.logical_and(done, torch.logical_not(info.get("TimeLimit.truncated")))
 
     for env_idx in range(num_envs):
         if done[env_idx]:
@@ -245,8 +244,8 @@ while global_step * num_envs < total_timesteps:
         if global_step % train_frequency == 0:
             for _ in range(grad_steps):
                 upper = min(global_step, memory_size)
-                batch_inds = np.random.randint(upper, size=batch_size)
-                env_inds = np.random.randint(num_envs, size=batch_size)
+                batch_inds = torch.randint(upper, (batch_size,))
+                env_inds = torch.randint(num_envs, (batch_size,))
 
                 b_observations = observations[batch_inds, env_inds].to(device, non_blocking=True)
                 b_actions = actions[batch_inds, env_inds].to(device, non_blocking=True)
